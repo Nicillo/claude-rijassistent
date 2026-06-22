@@ -368,14 +368,31 @@
     return `Afspraak "${subject}" aangemaakt op ${new Date(start).toLocaleString('nl-BE', {weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})}.`;
   }
 
-  async function toolGetEmails({ count = 5, unread_only = false }) {
+  async function toolGetEmails({ count = 5, unread_only = false, from = '', subject = '' }) {
+    const filters = [];
+    if (unread_only) filters.push('isRead eq false');
+    if (from) filters.push(`(contains(from/emailAddress/address,'${from}') or contains(from/emailAddress/name,'${from}'))`);
+    if (subject) filters.push(`contains(subject,'${subject}')`);
     let url = `/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=subject,from,receivedDateTime,isRead,bodyPreview`;
-    if (unread_only) url += '&$filter=isRead eq false';
+    if (filters.length) url += '&$filter=' + encodeURIComponent(filters.join(' and '));
     const data = await graphCall(url);
     if (!data.value.length) return 'Geen e-mails gevonden.';
     return data.value.map(e =>
       `• ${e.from.emailAddress.name}: ${e.subject}${e.isRead ? '' : ' [ongelezen]'}\n  ${e.bodyPreview.substring(0, 80)}…`
     ).join('\n\n');
+  }
+
+  async function toolArchiveEmail({ subject, from }) {
+    let filter = '';
+    if (subject) filter += `contains(subject,'${subject}')`;
+    if (subject && from) filter += ' and ';
+    if (from) filter += `contains(from/emailAddress/address,'${from}') or contains(from/emailAddress/name,'${from}')`;
+    const url = `/me/messages?$top=5&$select=id,subject,from${filter ? '&$filter=' + encodeURIComponent(filter) : '&$orderby=receivedDateTime desc'}`;
+    const data = await graphCall(url);
+    if (!data.value.length) return `Geen e-mail gevonden${subject ? ' met onderwerp "' + subject + '"' : ''}${from ? ' van ' + from : ''}.`;
+    const msg = data.value[0];
+    await graphCall(`/me/messages/${msg.id}/move`, 'POST', { destinationId: 'archive' });
+    return `E-mail "${msg.subject}" van ${msg.from.emailAddress.name} gearchiveerd.`;
   }
 
   async function toolSendEmail({ to, subject, body }) {
@@ -395,6 +412,7 @@
       case 'delete_calendar_event': return toolDeleteCalendarEvent(input);
     case 'create_calendar_event': return toolCreateCalendarEvent(input);
       case 'get_emails':           return toolGetEmails(input);
+      case 'archive_email':        return toolArchiveEmail(input);
       case 'send_email':           return toolSendEmail(input);
       default: throw new Error(`Onbekend tool: ${name}`);
     }
@@ -441,7 +459,20 @@
         type: 'object',
         properties: {
           count:       { type: 'number',  description: 'Aantal e-mails (standaard 5)' },
-          unread_only: { type: 'boolean', description: 'Alleen ongelezen' }
+          unread_only: { type: 'boolean', description: 'Alleen ongelezen' },
+          from:        { type: 'string',  description: 'Filter op afzender naam of e-mailadres' },
+          subject:     { type: 'string',  description: 'Filter op onderwerp' }
+        }
+      }
+    },
+    {
+      name: 'archive_email',
+      description: 'Archiveer een e-mail in Outlook.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: 'Onderwerp of deel ervan' },
+          from:    { type: 'string', description: 'Naam of e-mailadres van de afzender' }
         }
       }
     },
