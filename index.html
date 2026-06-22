@@ -292,11 +292,16 @@
   }
 
   async function toggleOutlook() {
-    if (!msalInstance) return;
-    if (msalAccount) {
-      await msalInstance.logoutRedirect({ account: msalAccount });
-    } else {
-      await msalInstance.loginRedirect({ scopes: SCOPES });
+    if (!msalInstance) { showToast('Outlook nog niet geladen — herlaad de pagina'); return; }
+    try {
+      if (msalAccount) {
+        await msalInstance.logoutRedirect({ account: msalAccount });
+      } else {
+        await msalInstance.loginRedirect({ scopes: SCOPES });
+      }
+    } catch (e) {
+      showToast('Outlook fout: ' + e.message);
+      console.error(e);
     }
   }
 
