@@ -342,6 +342,21 @@
     ).join('\n');
   }
 
+  async function toolDeleteCalendarEvent({ subject, start }) {
+    const now = new Date();
+    const end = new Date(now.getTime() + 30 * 86400000);
+    const data = await graphCall(
+      `/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${end.toISOString()}&$select=id,subject,start`
+    );
+    const match = data.value.find(e =>
+      e.subject.toLowerCase().includes(subject.toLowerCase()) &&
+      (!start || e.start.dateTime.startsWith(start.substring(0, 10)))
+    );
+    if (!match) return `Geen afspraak gevonden met naam "${subject}".`;
+    await graphCall(`/me/events/${match.id}`, 'DELETE');
+    return `Afspraak "${match.subject}" verwijderd.`;
+  }
+
   async function toolCreateCalendarEvent({ subject, start, end, location = '', body = '' }) {
     await graphCall('/me/events', 'POST', {
       subject,
@@ -377,7 +392,8 @@
   async function executeTool(name, input) {
     switch (name) {
       case 'get_calendar_events':  return toolGetCalendarEvents(input);
-      case 'create_calendar_event': return toolCreateCalendarEvent(input);
+      case 'delete_calendar_event': return toolDeleteCalendarEvent(input);
+    case 'create_calendar_event': return toolCreateCalendarEvent(input);
       case 'get_emails':           return toolGetEmails(input);
       case 'send_email':           return toolSendEmail(input);
       default: throw new Error(`Onbekend tool: ${name}`);
@@ -390,6 +406,18 @@
       name: 'get_calendar_events',
       description: 'Haal aankomende agenda-afspraken op uit Outlook.',
       input_schema: { type: 'object', properties: { days: { type: 'number', description: 'Aantal dagen vooruit (standaard 7)' } } }
+    },
+    {
+      name: 'delete_calendar_event',
+      description: 'Verwijder een bestaande afspraak uit de Outlook agenda.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: 'Naam of deel van de naam van de afspraak' },
+          start:   { type: 'string', description: 'Datum van de afspraak ISO 8601 (optioneel, voor precisie)' }
+        },
+        required: ['subject']
+      }
     },
     {
       name: 'create_calendar_event',
@@ -522,7 +550,7 @@
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
             max_tokens: 1024,
-            system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Geen lange lijsten. Bevestig acties duidelijk. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus}`,
+            system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus}`,
             tools: CLAUDE_TOOLS,
             messages
           })
