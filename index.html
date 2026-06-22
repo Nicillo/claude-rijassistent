@@ -229,7 +229,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
 <script>
   // ── Config ─────────────────────────────────────────────
   const CLIENT_ID  = 'b78985dd-7d7f-4d68-97c6-93b487749a26';
@@ -276,7 +276,8 @@
       }
       updateOutlookBtn();
     } catch (e) {
-      console.warn('MSAL init fout:', e);
+      console.error('MSAL init fout:', e);
+      showToast('Outlook init fout: ' + e.message);
     }
   }
 
