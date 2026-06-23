@@ -52,6 +52,26 @@
   }
   .outlook-btn:hover { border-color: var(--blue); color: var(--blue); }
   .outlook-btn.connected { color: var(--green); border-color: var(--green); }
+  /* ── TL Log paneel ── */
+  .tl-log-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: none; }
+  .tl-log-panel { position: fixed; top: 0; right: 0; width: 380px; max-width: 100vw; height: 100vh; background: var(--surface); border-left: 1px solid var(--border); z-index: 101; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
+  .tl-log-panel.open { transform: translateX(0); }
+  .tl-log-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .tl-log-header h3 { font-size: 14px; font-weight: 600; margin: 0; }
+  .tl-log-close { background: none; border: none; color: var(--text-dim); font-size: 20px; cursor: pointer; line-height: 1; }
+  .tl-log-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .tl-log-empty { color: var(--text-dim); font-size: 13px; text-align: center; margin-top: 40px; }
+  .tl-log-entry { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 12px; }
+  .tl-log-entry-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .tl-log-entry-info { flex: 1; }
+  .tl-log-action { font-weight: 600; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tl-log-desc { color: var(--text); margin-top: 2px; line-height: 1.4; }
+  .tl-log-time { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+  .tl-log-undo { margin-top: 8px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 11px; padding: 4px 10px; cursor: pointer; width: 100%; }
+  .tl-log-undo:hover { border-color: var(--accent); color: var(--accent); }
+  .tl-log-undo:disabled { opacity: 0.4; cursor: default; }
+  .tl-log-badge { position: relative; }
+  .tl-log-badge-count { position: absolute; top: -4px; right: -4px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; border-radius: 8px; padding: 1px 4px; min-width: 14px; text-align: center; line-height: 14px; display: none; }
   .conversation {
     flex: 1;
     overflow-y: auto;
@@ -166,6 +186,18 @@
 </head>
 <body>
 
+<!-- TL Log paneel -->
+<div class="tl-log-overlay" id="tlLogOverlay" onclick="closeTlLog()"></div>
+<div class="tl-log-panel" id="tlLogPanel">
+  <div class="tl-log-header">
+    <h3>Teamleader wijzigingen</h3>
+    <button class="tl-log-close" onclick="closeTlLog()">×</button>
+  </div>
+  <div class="tl-log-body" id="tlLogBody">
+    <div class="tl-log-empty">Nog geen wijzigingen geregistreerd.</div>
+  </div>
+</div>
+
 <div class="api-overlay" id="apiOverlay">
   <div class="api-card">
     <div class="logo-dot" style="width:10px;height:10px"></div>
@@ -182,7 +214,11 @@
     <div class="logo-text">Claude <span>/ rijmodus</span></div>
   </div>
   <div class="header-right">
-    <button class="outlook-btn" id="tlBtn" onclick="toggleTeamleader()">🔗 Teamleader</button>
+    <div class="tl-log-badge">
+      <button class="outlook-btn" id="tlBtn" onclick="toggleTeamleader()">🔗 Teamleader</button>
+      <span class="tl-log-badge-count" id="tlLogBadge"></span>
+    </div>
+    <button class="outlook-btn" id="tlLogBtn" onclick="openTlLog()" title="TL Wijzigingslog">📋 Log</button>
     <button class="outlook-btn" id="outlookBtn" onclick="toggleOutlook()">🔗 Outlook</button>
     <div class="status-pill">
       <div class="status-dot"></div>
@@ -232,6 +268,66 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
 <script>
+  // ── TL Wijzigingslog ────────────────────────────────────
+  const TL_LOG_KEY = 'tl_action_log';
+
+  function tlLogLoad() {
+    try { return JSON.parse(localStorage.getItem(TL_LOG_KEY) || '[]'); } catch { return []; }
+  }
+  function tlLogSave(entries) {
+    localStorage.setItem(TL_LOG_KEY, JSON.stringify(entries));
+  }
+  function tlLogAdd(action, description, undoData) {
+    const entries = tlLogLoad();
+    entries.unshift({ id: Date.now(), action, description, undoData, ts: new Date().toISOString(), undone: false });
+    tlLogSave(entries);
+    renderTlLog();
+  }
+  function openTlLog()  { document.getElementById('tlLogPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderTlLog(); }
+  function closeTlLog() { document.getElementById('tlLogPanel').classList.remove('open'); document.getElementById('tlLogOverlay').style.display = 'none'; }
+
+  function renderTlLog() {
+    const entries = tlLogLoad();
+    const body = document.getElementById('tlLogBody');
+    const badge = document.getElementById('tlLogBadge');
+    const undone_count = entries.filter(e => !e.undone).length;
+    badge.textContent = undone_count;
+    badge.style.display = undone_count > 0 ? 'block' : 'none';
+    if (!entries.length) { body.innerHTML = '<div class="tl-log-empty">Nog geen wijzigingen geregistreerd.</div>'; return; }
+    body.innerHTML = entries.map(e => `
+      <div class="tl-log-entry" id="logentry-${e.id}">
+        <div class="tl-log-entry-top">
+          <div class="tl-log-entry-info">
+            <div class="tl-log-action">${e.action}</div>
+            <div class="tl-log-desc">${e.description}</div>
+          </div>
+          <div class="tl-log-time">${new Date(e.ts).toLocaleString('nl-BE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        ${e.undoData && !e.undone ? `<button class="tl-log-undo" onclick="tlUndo(${e.id})">↩ Ongedaan maken</button>` : ''}
+        ${e.undone ? `<div style="color:var(--text-dim);font-size:11px;margin-top:6px;">✓ Ongedaan gemaakt</div>` : ''}
+      </div>`).join('');
+  }
+
+  async function tlUndo(id) {
+    const entries = tlLogLoad();
+    const entry = entries.find(e => e.id === id);
+    if (!entry || entry.undone) return;
+    const btn = document.querySelector(`#logentry-${id} .tl-log-undo`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig...'; }
+    try {
+      const { type, resourceId } = entry.undoData;
+      if (type === 'contact')  await tlFetch(`/api/contacts/${resourceId}`,  { method: 'DELETE' });
+      if (type === 'company')  await tlFetch(`/api/companies/${resourceId}`, { method: 'DELETE' });
+      entry.undone = true;
+      tlLogSave(entries);
+      renderTlLog();
+      showToast('Actie ongedaan gemaakt.');
+    } catch (err) {
+      if (btn) { btn.disabled = false; btn.textContent = '↩ Ongedaan maken'; }
+      showToast('Fout bij ongedaan maken: ' + err.message);
+    }
+  }
+
   // ── Teamleader proxy ────────────────────────────────────
   const TL_PROXY = 'https://nivo-outlook-addin.azurewebsites.net';
   const TL_USER  = 'nicholas.provo@nivosystems.be';
@@ -294,6 +390,8 @@
     const data = await tlFetch('/api/contacts/create', {
       method: 'POST', body: JSON.stringify({ first_name, last_name, email, company_id, phone })
     });
+    const resourceId = data?.id || data?.data?.id;
+    tlLogAdd('Contact aangemaakt', `${first_name} ${last_name}${email ? ' — ' + email : ''}`, resourceId ? { type: 'contact', resourceId } : null);
     return `Contact ${first_name} ${last_name} aangemaakt in Teamleader.`;
   }
 
@@ -304,9 +402,11 @@
   }
 
   async function toolTlCreateCompany({ name, vat_number, email, phone, website }) {
-    await tlFetch('/api/companies/create', {
+    const data = await tlFetch('/api/companies/create', {
       method: 'POST', body: JSON.stringify({ name, vat_number, email, phone, website })
     });
+    const resourceId = data?.id || data?.data?.id;
+    tlLogAdd('Bedrijf aangemaakt', `${name}${vat_number ? ' — BTW: ' + vat_number : ''}`, resourceId ? { type: 'company', resourceId } : null);
     return `Bedrijf "${name}" aangemaakt in Teamleader.`;
   }
 
