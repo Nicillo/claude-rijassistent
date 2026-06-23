@@ -752,7 +752,8 @@
     let url;
     if (from) {
       // $search en $orderby zijn niet combineerbaar in Graph API
-      url = `/me/messages?$top=${count}&$select=${select}&$search="from:${from}"`;
+      // Gebruik gewone zoekterm — Graph zoekt in afzender, onderwerp en body
+      url = `/me/messages?$top=${count}&$select=${select}&$search="${from.replace(/"/g, '')}"`;
     } else {
       url = `/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=${select}`;
       if (filters.length) url += '&$filter=' + encodeURIComponent(filters.join(' and '));
