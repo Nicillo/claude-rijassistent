@@ -642,9 +642,8 @@
     }
 
     if (!nieuw.length) return `Alle gevonden afzenders${company ? ' van ' + company : ''} staan al in Teamleader.`;
-    return `${nieuw.length} persoon/personen nog niet in Teamleader:\n` +
-      nieuw.map((c, i) => `${i+1}. ${c.name} — ${c.email}`).join('\n') +
-      '\n\nKlik of zeg een naam om die toe te voegen.';
+    const listText = nieuw.map((c, i) => `${i+1}. ${c.name} — ${c.email}`).join('\n');
+    return `TOON DEZE LIJST LETTERLIJK AAN DE GEBRUIKER (niet samenvatten):\n${listText}\n\nVraag: welke wil je toevoegen? (zeg een naam of nummer)`;
   }
 
   async function toolTlGetCompanyContacts({ company_name }) {
@@ -1182,7 +1181,7 @@
             max_tokens: 1024,
             system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}
 
-Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag naar het BEDRIJF en gebruik suggest_contacts_from_email met de bedrijfsnaam als company parameter. ALTIJD de resultaten tonen als genummerde lijst (1. Naam — email) zodat de gebruiker kan klikken. Gebruik daarna get_emails met include_body:true op de gekozen persoon om handtekening te lezen. Extraheer: voornaam, achternaam, e-mail, vast telefoonnummer (phone), gsm (mobile), functie (function_title), bedrijf. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst. Gebruik tl_search_companies voor company_id (stuur altijd de UUID door, nooit de naam). Stel nooit een contact voor zonder e-mailadres. Als suggest_contacts_from_email een lijst geeft, toon die ALTIJD als genummerde lijst — nooit samenvatten.`,
+Werkwijze contacten toevoegen: gebruik suggest_contacts_from_email (met company filter indien van toepassing). De tool geeft een genummerde lijst — kopieer die lijst LETTERLIJK in je antwoord, voeg niets samen, vat niets samen. Als de gebruiker daarna "ja" of een naam of nummer zegt, voeg dan DIE persoon toe — zoek NIET opnieuw in e-mails tenzij je de handtekening nog nodig hebt. Gebruik get_emails met include_body:true alleen om extra gegevens (telefoon, functie) op te halen van de gekozen persoon. Gebruik tl_search_companies om de company_id (UUID) op te zoeken — stuur nooit de bedrijfsnaam als company_id. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst.`,
             tools: CLAUDE_TOOLS,
             messages
           })
