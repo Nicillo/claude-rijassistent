@@ -441,6 +441,16 @@
     return projects.map(p => `• ${p.name} (id: ${p.id})`).join('\n');
   }
 
+  async function toolTlGetCompanyContacts({ company_name }) {
+    const companies = await tlFetch(`/api/companies/search?q=${encodeURIComponent(company_name)}`);
+    if (!companies.length) return `Geen bedrijf gevonden met naam "${company_name}".`;
+    const company = companies[0];
+    const data = await tlFetch(`/api/contacts/search?q=&company_id=${encodeURIComponent(company.id)}`);
+    if (!data.length) return `Geen contacten gevonden voor ${company.name}.`;
+    return `${company.name} heeft ${data.length} contactpersoon/personen:\n` +
+      data.map(c => `• ${c.name}${c.email ? ' — ' + c.email : ''}`).join('\n');
+  }
+
   // ── Config ─────────────────────────────────────────────
   const CLIENT_ID  = 'b78985dd-7d7f-4d68-97c6-93b487749a26';
   const TENANT_ID  = 'c2afd855-3cc7-4313-83b1-e0d3f8924000';
@@ -650,7 +660,8 @@
       case 'tl_create_contact':    return toolTlCreateContact(input);
       case 'tl_search_companies':  return toolTlSearchCompanies(input);
       case 'tl_create_company':    return toolTlCreateCompany(input);
-      case 'tl_search_projects':   return toolTlSearchProjects(input);
+      case 'tl_search_projects':      return toolTlSearchProjects(input);
+      case 'tl_get_company_contacts': return toolTlGetCompanyContacts(input);
       case 'archive_email':        return toolArchiveEmail(input);
       case 'send_email':           return toolSendEmail(input);
       default: throw new Error(`Onbekend tool: ${name}`);
@@ -748,6 +759,11 @@
       name: 'tl_search_projects',
       description: 'Zoek open projecten in Teamleader voor een klant.',
       input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Naam van de klant' } }, required: ['query'] }
+    },
+    {
+      name: 'tl_get_company_contacts',
+      description: 'Haal alle contactpersonen op die gekoppeld zijn aan een specifiek bedrijf in Teamleader. Gebruik dit als de gebruiker vraagt welke contacten er bij een bedrijf horen.',
+      input_schema: { type: 'object', properties: { company_name: { type: 'string', description: 'Naam van het bedrijf' } }, required: ['company_name'] }
     },
     {
       name: 'archive_email',
