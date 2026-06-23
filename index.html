@@ -571,22 +571,30 @@
     return projects.map(p => `• ${p.name} (id: ${p.id})`).join('\n');
   }
 
-  async function toolSuggestContactsFromEmail({ count = 20 }) {
-    // Haal recente e-mail afzenders op
-    const data = await graphCall(`/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=subject,from,receivedDateTime`);
-    if (!data.value.length) return 'Geen e-mails gevonden.';
+  async function toolSuggestContactsFromEmail({ count = 50, company = '' }) {
+    // Zoek e-mails — filter op bedrijfsdomein als opgegeven
+    let url;
+    if (company) {
+      url = `/me/messages?$top=${count}&$select=subject,from,receivedDateTime&$search="${company}"`;
+    } else {
+      url = `/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=subject,from,receivedDateTime`;
+    }
+    const data = await graphCall(url);
+    if (!data?.value?.length) return 'Geen e-mails gevonden.';
 
-    // Unieke afzenders (geen eigen adres, geen noreply)
+    // Unieke externe afzenders
     const seen = new Set();
     const senders = [];
     for (const msg of data.value) {
       const addr = msg.from?.emailAddress?.address?.toLowerCase() || '';
       const name = msg.from?.emailAddress?.name || '';
-      if (!addr || seen.has(addr) || addr.includes('noreply') || addr.includes('no-reply') || addr.includes('nicillo') || addr.includes('nivo')) continue;
+      if (!addr || seen.has(addr)) continue;
+      if (addr.includes('noreply') || addr.includes('no-reply')) continue;
+      if (addr.includes('@nivosystems') || addr.includes('@nivo')) continue;
       seen.add(addr);
-      senders.push({ name, email: addr, subject: msg.subject });
+      senders.push({ name, email: addr });
     }
-    if (!senders.length) return 'Geen nieuwe afzenders gevonden.';
+    if (!senders.length) return 'Geen relevante afzenders gevonden.';
 
     // Check welke al in Teamleader staan
     const nieuw = [];
@@ -594,18 +602,16 @@
       try {
         const found = await tlFetch(`/api/contacts/search?q=${encodeURIComponent(s.email)}`);
         if (!found.length) {
-          // Bepaal bedrijfsnaam uit e-maildomein
-          const domain = s.email.split('@')[1]?.replace('www.', '') || '';
-          const domainName = domain.split('.')[0];
-          nieuw.push({ ...s, domain, domainName });
+          const domain = s.email.split('@')[1] || '';
+          nieuw.push({ ...s, domain });
         }
       } catch { /* skip */ }
     }
 
-    if (!nieuw.length) return 'Alle recente afzenders staan al in Teamleader.';
-    return `${nieuw.length} afzender(s) nog niet in Teamleader:\n` +
-      nieuw.map(c => `• ${c.name} <${c.email}> (waarschijnlijk: ${c.domainName})`).join('\n') +
-      '\n\nWil je ze toevoegen? Ik kan ze één voor één voorstellen.';
+    if (!nieuw.length) return `Alle gevonden afzenders${company ? ' van ' + company : ''} staan al in Teamleader.`;
+    return `${nieuw.length} persoon/personen nog niet in Teamleader:\n` +
+      nieuw.map((c, i) => `${i+1}. ${c.name} — ${c.email}`).join('\n') +
+      '\n\nKlik of zeg een naam om die toe te voegen.';
   }
 
   async function toolTlGetCompanyContacts({ company_name }) {
@@ -979,8 +985,11 @@
     },
     {
       name: 'suggest_contacts_from_email',
-      description: 'Analyseer recente e-mail afzenders en stel voor welke nog niet in Teamleader staan zodat de gebruiker ze kan toevoegen.',
-      input_schema: { type: 'object', properties: { count: { type: 'number', description: 'Aantal recente e-mails om te scannen (standaard 20)' } }, required: [] }
+      description: 'Scan e-mails op afzenders die nog niet in Teamleader staan. Gebruik company parameter om te filteren op bedrijfsnaam. Geeft een genummerde lijst terug zodat de gebruiker kan klikken.',
+      input_schema: { type: 'object', properties: {
+        count:   { type: 'number', description: 'Aantal e-mails om te scannen (standaard 50)' },
+        company: { type: 'string', description: 'Filter op bedrijfsnaam bv. "Astra Sweets" — zoekt alleen e-mails die deze term bevatten' }
+      }, required: [] }
     },
     {
       name: 'tl_get_company_contacts',
