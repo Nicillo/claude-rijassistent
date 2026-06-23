@@ -145,15 +145,34 @@
   @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
   .mic-hint { font-size: 11px; color: var(--text-muted); height: 16px; text-align: center; }
   .mic-hint.active { color: var(--accent); }
-  .quick-actions { display: flex; gap: 8px; width: 100%; }
-  .quick-btn {
-    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 8px 6px; color: var(--text-dim); font-size: 11px; font-family: inherit;
-    cursor: pointer; text-align: center; display: flex; flex-direction: column; align-items: center;
-    gap: 3px; transition: all 0.15s; -webkit-tap-highlight-color: transparent; outline: none;
+  /* ── Approval panel ── */
+  .approval-panel {
+    display: none; width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 16px; flex-direction: column; gap: 10px;
   }
-  .quick-btn:active { background: var(--surface2); border-color: var(--accent); color: var(--text); }
-  .quick-btn .qicon { font-size: 14px; }
+  .approval-panel.visible { display: flex; }
+  .approval-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); }
+  .approval-action { font-size: 13px; font-weight: 600; color: var(--accent); }
+  .approval-details { font-size: 11px; color: var(--text); line-height: 1.7; }
+  .approval-btns { display: flex; gap: 8px; }
+  .approval-btn {
+    flex: 1; border: none; border-radius: 10px; padding: 10px 8px; font-size: 13px;
+    font-weight: 600; cursor: pointer; font-family: inherit; transition: opacity 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .approval-btn:active { opacity: 0.7; }
+  .approval-btn.ok    { background: #1a4a2e; color: #3ddc84; border: 1px solid #3ddc84; }
+  .approval-btn.nok   { background: #4a1a1a; color: #ff6b6b; border: 1px solid #ff6b6b; }
+  .approval-btn.edit  { background: #1a2a4a; color: #4a9eff; border: 1px solid #4a9eff; }
+  /* ── Bottom log button ── */
+  .bottom-bar { display: flex; align-items: center; justify-content: center; width: 100%; }
+  .log-bottom-btn {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+    padding: 7px 18px; color: var(--text-dim); font-size: 12px; font-family: inherit;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .log-bottom-btn:active { border-color: var(--accent); color: var(--text); }
   .api-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.9);
     display: flex; align-items: center; justify-content: center; z-index: 100;
@@ -218,7 +237,6 @@
       <button class="outlook-btn" id="tlBtn" onclick="toggleTeamleader()">🔗 Teamleader</button>
       <span class="tl-log-badge-count" id="tlLogBadge"></span>
     </div>
-    <button class="outlook-btn" id="tlLogBtn" onclick="openTlLog()" title="TL Wijzigingslog">📋 Log</button>
     <button class="outlook-btn" id="outlookBtn" onclick="toggleOutlook()">🔗 Outlook</button>
     <div class="status-pill">
       <div class="status-dot"></div>
@@ -248,19 +266,19 @@
 
   <div class="mic-hint" id="micHint">Druk om te spreken</div>
 
-  <div class="quick-actions">
-    <button class="quick-btn" onclick="sendQuick('Wat zijn mijn afspraken vandaag?')">
-      <span class="qicon">📅</span><span>Agenda</span>
-    </button>
-    <button class="quick-btn" onclick="sendQuick('Wat zijn mijn laatste ongelezen e-mails?')">
-      <span class="qicon">📧</span><span>E-mail</span>
-    </button>
-    <button class="quick-btn" onclick="sendQuick('Maak een verslag van de vergadering die ik ga dicteren')">
-      <span class="qicon">📋</span><span>Verslag</span>
-    </button>
-    <button class="quick-btn" onclick="clearConversation()">
-      <span class="qicon">🗑️</span><span>Wissen</span>
-    </button>
+  <div class="approval-panel" id="approvalPanel">
+    <div class="approval-label">Wachten op bevestiging</div>
+    <div class="approval-action" id="approvalAction"></div>
+    <div class="approval-details" id="approvalDetails"></div>
+    <div class="approval-btns">
+      <button class="approval-btn ok"   onclick="resolveApproval('ok')">✅ Uitvoeren</button>
+      <button class="approval-btn nok"  onclick="resolveApproval('nok')">❌ Annuleren</button>
+      <button class="approval-btn edit" onclick="resolveApproval('edit')">✏️ Aanpassen</button>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <button class="log-bottom-btn" onclick="openTlLog()">📋 Log <span id="logBottomBadge"></span></button>
   </div>
 </div>
 
@@ -288,13 +306,48 @@
 
   const CATEGORY_COLOR = { Teamleader: '#e8622a', Outlook: '#4a9eff' };
 
+  // ── Approval flow ────────────────────────────────────────
+  const WRITE_TOOLS = new Set([
+    'create_calendar_event','delete_calendar_event','send_email','archive_email',
+    'tl_create_contact','tl_create_company'
+  ]);
+
+  const TOOL_LABELS = {
+    create_calendar_event:  'Afspraak aanmaken',
+    delete_calendar_event:  'Afspraak verwijderen',
+    send_email:             'E-mail versturen',
+    archive_email:          'E-mail archiveren',
+    tl_create_contact:      'Contact aanmaken in Teamleader',
+    tl_create_company:      'Bedrijf aanmaken in Teamleader',
+  };
+
+  let approvalResolve = null;
+
+  function requestApproval(toolName, input) {
+    return new Promise(resolve => {
+      approvalResolve = resolve;
+      const panel = document.getElementById('approvalPanel');
+      document.getElementById('approvalAction').textContent = TOOL_LABELS[toolName] || toolName;
+      document.getElementById('approvalDetails').innerHTML = Object.entries(input)
+        .filter(([,v]) => v !== undefined && v !== '')
+        .map(([k,v]) => `<b>${k}:</b> ${v}`).join('<br>');
+      panel.classList.add('visible');
+    });
+  }
+
+  function resolveApproval(decision) {
+    document.getElementById('approvalPanel').classList.remove('visible');
+    if (approvalResolve) { approvalResolve(decision); approvalResolve = null; }
+  }
+
   function renderLog() {
     const entries = logLoad();
     const body = document.getElementById('tlLogBody');
     const badge = document.getElementById('tlLogBadge');
     const active = entries.filter(e => !e.undone).length;
-    badge.textContent = active;
-    badge.style.display = active > 0 ? 'block' : 'none';
+    badge.textContent = active > 0 ? ` (${active})` : '';
+    const bottomBadge = document.getElementById('logBottomBadge');
+    if (bottomBadge) bottomBadge.textContent = active > 0 ? ` (${active})` : '';
     if (!entries.length) { body.innerHTML = '<div class="tl-log-empty">Nog geen acties geregistreerd.</div>'; return; }
     body.innerHTML = entries.map(e => {
       const color = CATEGORY_COLOR[e.category] || 'var(--text-dim)';
@@ -651,6 +704,27 @@
   }
 
   async function executeTool(name, input) {
+    // Schrijf-acties vragen eerst goedkeuring
+    if (WRITE_TOOLS.has(name)) {
+      const decision = await requestApproval(name, input);
+      if (decision === 'nok') return 'De gebruiker heeft deze actie geannuleerd.';
+      if (decision === 'edit') {
+        // Activeer mic zodat gebruiker aanpassingen kan inspreken
+        showToast('Spreek je aanpassing in...');
+        const correction = await new Promise(resolve => {
+          const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+          rec.lang = 'nl-NL'; rec.interimResults = false;
+          rec.onresult = e => resolve(e.results[0][0].transcript);
+          rec.onerror = () => resolve('');
+          rec.start();
+        });
+        if (correction) {
+          return `De gebruiker wil de volgende aanpassing: "${correction}". Pas de actie aan en stel opnieuw voor.`;
+        }
+        return 'De gebruiker heeft geen aanpassing ingesproken. Probeer opnieuw.';
+      }
+      // decision === 'ok' → verder met uitvoering
+    }
     switch (name) {
       case 'get_calendar_events':  return toolGetCalendarEvents(input);
       case 'delete_calendar_event': return toolDeleteCalendarEvent(input);
