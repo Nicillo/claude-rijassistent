@@ -376,16 +376,21 @@
   const TOOL_LABELS = {
     tl_create_contact:    'Contact aanmaken in Teamleader',
     tl_create_company:    'Bedrijf aanmaken in Teamleader',
+    tl_create_deal:       'Deal aanmaken in Teamleader',
+    tl_add_deal_note:     'Notitie toevoegen aan deal',
     create_calendar_event:'Afspraak aanmaken',
     delete_calendar_event:'Afspraak verwijderen',
     send_email:           'E-mail versturen',
     archive_email:        'E-mail archiveren',
+    move_email_to_folder: 'E-mail verplaatsen naar map',
+    link_email_to_deal:   'E-mail koppelen aan deal',
   };
 
   // ── Approval flow ────────────────────────────────────────
   const WRITE_TOOLS = new Set([
     'create_calendar_event','delete_calendar_event','send_email','archive_email',
-    'tl_create_contact','tl_create_company','move_email_to_folder','tl_add_deal_note','tl_create_deal'
+    'tl_create_contact','tl_create_company','move_email_to_folder','tl_add_deal_note',
+    'tl_create_deal','link_email_to_deal'
   ]);
 
   let approvalResolve = null;
@@ -895,17 +900,31 @@
       .join('\n');
   }
 
-  async function toolMoveEmailToFolder({ subject, from, folder_name }) {
-    // 1. Zoek of de map al bestaat
-    const folders = await graphCall('/me/mailFolders?$top=100&$select=id,displayName');
-    let folder = folders.value.find(f => f.displayName.toLowerCase() === folder_name.toLowerCase());
-
-    // 2. Maak map aan als die niet bestaat
+  async function findOrCreateFolder(parentId, name) {
+    const url = parentId
+      ? `/me/mailFolders/${parentId}/childFolders?$top=100&$select=id,displayName`
+      : `/me/mailFolders?$top=100&$select=id,displayName`;
+    const list = await graphCall(url);
+    let folder = list.value.find(f => f.displayName.toLowerCase() === name.toLowerCase());
     if (!folder) {
-      folder = await graphCall('/me/mailFolders', 'POST', { displayName: folder_name });
+      const createUrl = parentId ? `/me/mailFolders/${parentId}/childFolders` : '/me/mailFolders';
+      folder = await graphCall(createUrl, 'POST', { displayName: name });
+    }
+    return folder;
+  }
+
+  async function toolMoveEmailToFolder({ subject, from, folder_name, subfolder_name }) {
+    // Ondersteunt "Bedrijf/Project" of aparte subfolder_name parameter
+    let parts = folder_name.split('/').map(p => p.trim()).filter(Boolean);
+    if (subfolder_name) parts.push(subfolder_name);
+
+    // Maak mapstructuur aan
+    let folder = null;
+    for (const part of parts) {
+      folder = await findOrCreateFolder(folder?.id || null, part);
     }
 
-    // 3. Zoek de e-mail
+    // Zoek de e-mail
     let filter = '';
     if (subject) filter += `contains(subject,'${subject.replace(/'/g, '')}')`;
     if (subject && from) filter += ' and ';
@@ -915,14 +934,36 @@
     if (!data.value.length) return `Geen e-mail gevonden${subject ? ' met onderwerp "' + subject + '"' : ''}.`;
     const msg = data.value[0];
 
-    // 4. Verplaats
     await graphCall(`/me/messages/${msg.id}/move`, 'POST', { destinationId: folder.id });
+    const fullPath = parts.join(' / ');
     logAdd('Outlook', 'E-mail verplaatst', {
       'Onderwerp': msg.subject,
       'Van': msg.from.emailAddress.name,
-      'Naar map': folder_name,
+      'Naar map': fullPath,
     }, { type: 'outlook_archive', id: msg.id });
-    return `E-mail "${msg.subject}" verplaatst naar map "${folder_name}".`;
+    return `E-mail "${msg.subject}" verplaatst naar map "${fullPath}".`;
+  }
+
+  async function toolLinkEmailToDeal({ subject, from, company_name, deal_id, deal_title, note }) {
+    // 1. Verplaats mail naar bedrijfsmap / dealmap
+    const moveResult = await toolMoveEmailToFolder({
+      subject, from,
+      folder_name: company_name,
+      subfolder_name: deal_title || undefined
+    });
+
+    // 2. Voeg notitie toe aan deal
+    if (deal_id && note) {
+      await tlFetch('/api/deals/note', {
+        method: 'POST',
+        body: JSON.stringify({ deal_id, note })
+      });
+      logAdd('Teamleader', 'Notitie op deal', {
+        'Deal': deal_title || deal_id,
+        'Notitie': note.substring(0, 120)
+      }, null);
+    }
+    return `${moveResult}${deal_id ? ' Notitie toegevoegd aan deal "' + (deal_title || deal_id) + '".' : ''}`;
   }
 
   // ── Teamleader deals & notities ─────────────────────────
@@ -1023,6 +1064,7 @@
       case 'send_email':                return toolSendEmail(input);
       case 'move_email_to_folder':      return toolMoveEmailToFolder(input);
       case 'list_email_folders':        return toolListEmailFolders(input);
+      case 'link_email_to_deal':        return toolLinkEmailToDeal(input);
       case 'tl_get_deals':             return toolTlGetDeals(input);
       case 'tl_add_deal_note':         return toolTlAddDealNote(input);
       case 'tl_get_company_info':      return toolTlGetCompanyInfo(input);
@@ -1165,15 +1207,32 @@
     },
     {
       name: 'move_email_to_folder',
-      description: 'Verplaats een e-mail naar een specifieke map in Outlook. Maakt de map aan als die nog niet bestaat. Gebruik voor organisatie per klant of project.',
+      description: 'Verplaats een e-mail naar een map (of submap) in Outlook. Maakt mappen aan als ze niet bestaan. Gebruik folder_name voor bedrijfsnaam en subfolder_name voor project/deal.',
       input_schema: {
         type: 'object',
         properties: {
-          subject:     { type: 'string', description: 'Onderwerp of deel ervan om de mail te vinden' },
-          from:        { type: 'string', description: 'Afzender naam of e-mail (optioneel)' },
-          folder_name: { type: 'string', description: 'Naam van de doelmap, bv. "Astra Sweets" of "Project X"' }
+          subject:        { type: 'string', description: 'Onderwerp of deel ervan om de mail te vinden' },
+          from:           { type: 'string', description: 'Afzender naam of e-mail (optioneel)' },
+          folder_name:    { type: 'string', description: 'Naam van de hoofdmap, bv. "Astra Sweets". Kan ook "Bedrijf/Project" zijn.' },
+          subfolder_name: { type: 'string', description: 'Optionele submap, bv. de dealnaam "Cobot Toolchangers"' }
         },
         required: ['folder_name']
+      }
+    },
+    {
+      name: 'link_email_to_deal',
+      description: 'Verplaats een e-mail naar de bedrijfsmap/dealmap EN voeg een notitie toe aan de bijhorende deal in Teamleader. Gebruik dit om e-mails te koppelen aan projecten.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          subject:      { type: 'string', description: 'Onderwerp of deel van de e-mail' },
+          from:         { type: 'string', description: 'Afzender naam of adres (optioneel)' },
+          company_name: { type: 'string', description: 'Bedrijfsnaam voor de map, bv. "Astra Sweets"' },
+          deal_id:      { type: 'string', description: 'Teamleader deal ID (gebruik tl_get_deals om dit op te zoeken)' },
+          deal_title:   { type: 'string', description: 'Naam van de deal/project voor de submap' },
+          note:         { type: 'string', description: 'Notitie die aan de deal wordt toegevoegd, bv. samenvatting van de e-mail' }
+        },
+        required: ['company_name']
       }
     },
     {
