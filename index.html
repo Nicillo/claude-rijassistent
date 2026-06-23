@@ -762,7 +762,17 @@
     if (!data?.value?.length) return 'Geen e-mails gevonden.';
     return data.value.map(e => {
       const bodyText = include_body
-        ? '\n  BODY: ' + (e.body?.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 500)
+        ? '\n  INHOUD:\n' + (e.body?.content || '')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/\s*\n\s*/g, '\n')
+            .trim()
+            .substring(0, 2000)
         : '\n  ' + (e.bodyPreview || '').substring(0, 100) + '…';
       return `• Van: ${e.from.emailAddress.name} <${e.from.emailAddress.address}>\n  Onderwerp: ${e.subject}${e.isRead ? '' : ' [ongelezen]'}\n  Datum: ${new Date(e.receivedDateTime).toLocaleString('nl-BE')}${bodyText}`;
     }).join('\n\n');
@@ -1082,7 +1092,7 @@
             max_tokens: 1024,
             system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}
 
-Werkwijze contactgegevens uit e-mail halen: gebruik get_emails met de naam als 'from' parameter EN include_body:true. Haal dan naam, e-mailadres, telefoonnummer, functie en bedrijf uit de e-mailtekst/handtekening. Stel daarna tl_create_contact voor met alle gevonden gegevens. Gebruik tl_search_companies om het bedrijf te linken.`,
+Werkwijze contactgegevens uit e-mail halen: gebruik get_emails met de naam als 'from' parameter EN include_body:true EN count:5. Lees de volledige e-mailtekst en handtekening. Extraheer: naam, e-mailadres, telefoonnummer, functie, bedrijf. Een contact mag je ALLEEN aanmaken als je minstens naam EN e-mailadres hebt. Telefoonnummer en functie zijn sterk gewenst — zoek door meerdere e-mails als nodig. Gebruik tl_search_companies om het bedrijf te linken via company_id. Voeg nooit een contact toe zonder e-mailadres.`,
             tools: CLAUDE_TOOLS,
             messages
           })
