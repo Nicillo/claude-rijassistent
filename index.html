@@ -749,9 +749,14 @@
     }
     if (subject) filters.push(`contains(subject,'${subject}')`);
     const select = include_body ? 'subject,from,receivedDateTime,isRead,body' : 'subject,from,receivedDateTime,isRead,bodyPreview';
-    let url = `/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=${select}`;
-    if (from) url += `&$search="${encodeURIComponent(from)}"`;
-    else if (filters.length) url += '&$filter=' + encodeURIComponent(filters.join(' and '));
+    let url;
+    if (from) {
+      // $search en $orderby zijn niet combineerbaar in Graph API
+      url = `/me/messages?$top=${count}&$select=${select}&$search="from:${from}"`;
+    } else {
+      url = `/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=${select}`;
+      if (filters.length) url += '&$filter=' + encodeURIComponent(filters.join(' and '));
+    }
     const data = await graphCall(url);
     if (!data?.value?.length) return 'Geen e-mails gevonden.';
     return data.value.map(e => {
@@ -1074,7 +1079,9 @@
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
             max_tokens: 1024,
-            system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}`,
+            system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}
+
+Werkwijze contactgegevens uit e-mail halen: gebruik get_emails met de naam als 'from' parameter EN include_body:true. Haal dan naam, e-mailadres, telefoonnummer, functie en bedrijf uit de e-mailtekst/handtekening. Stel daarna tl_create_contact voor met alle gevonden gegevens. Gebruik tl_search_companies om het bedrijf te linken.`,
             tools: CLAUDE_TOOLS,
             messages
           })
