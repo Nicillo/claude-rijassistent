@@ -182,6 +182,7 @@
     <div class="logo-text">Claude <span>/ rijmodus</span></div>
   </div>
   <div class="header-right">
+    <button class="outlook-btn" id="tlBtn" onclick="toggleTeamleader()">🔗 Teamleader</button>
     <button class="outlook-btn" id="outlookBtn" onclick="toggleOutlook()">🔗 Outlook</button>
     <div class="status-pill">
       <div class="status-dot"></div>
@@ -231,6 +232,78 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
 <script>
+  // ── Teamleader proxy ────────────────────────────────────
+  const TL_PROXY = 'https://nivo-outlook-addin.azurewebsites.net';
+  const TL_USER  = 'nicholas.provo@nivosystems.be';
+  let tlConnected = false;
+
+  async function tlFetch(path, options = {}) {
+    const headers = { 'Content-Type': 'application/json', 'x-tl-user': TL_USER, ...(options.headers || {}) };
+    const res = await fetch(`${TL_PROXY}${path}`, { ...options, headers });
+    const data = await res.json();
+    if (res.status === 401 && data.loginUrl) {
+      window.open(`${TL_PROXY}${data.loginUrl}`, '_blank');
+      throw new Error('Teamleader login vereist — log in via het geopende venster en probeer opnieuw.');
+    }
+    if (!res.ok) throw new Error(data.error || `TL fout ${res.status}`);
+    return data;
+  }
+
+  async function checkTlConnection() {
+    try {
+      await tlFetch('/api/users');
+      tlConnected = true;
+    } catch { tlConnected = false; }
+    updateTlBtn();
+  }
+
+  function updateTlBtn() {
+    const btn = document.getElementById('tlBtn');
+    if (tlConnected) { btn.textContent = '✅ Teamleader'; btn.classList.add('connected'); }
+    else { btn.textContent = '🔗 Teamleader'; btn.classList.remove('connected'); }
+  }
+
+  function toggleTeamleader() {
+    if (tlConnected) { showToast('Teamleader is verbonden'); return; }
+    window.open(`${TL_PROXY}/oauth/start?user=${encodeURIComponent(TL_USER)}`, '_blank');
+    showToast('Log in via het geopende venster, daarna herlaad de pagina');
+  }
+
+  // ── Teamleader tool helpers ──────────────────────────────
+  async function toolTlSearchContacts({ query }) {
+    const data = await tlFetch(`/api/contacts/search?q=${encodeURIComponent(query)}`);
+    if (!data.length) return 'Geen contacten gevonden.';
+    return data.map(c => `• ${c.name}${c.company ? ' (' + c.company + ')' : ''} — ${c.email}`).join('\n');
+  }
+
+  async function toolTlCreateContact({ first_name, last_name, email, company_id, phone }) {
+    const data = await tlFetch('/api/contacts/create', {
+      method: 'POST', body: JSON.stringify({ first_name, last_name, email, company_id, phone })
+    });
+    return `Contact ${first_name} ${last_name} aangemaakt in Teamleader.`;
+  }
+
+  async function toolTlSearchCompanies({ query }) {
+    const data = await tlFetch(`/api/companies/search?q=${encodeURIComponent(query)}`);
+    if (!data.length) return 'Geen bedrijven gevonden.';
+    return data.map(c => `• ${c.name}${c.vat ? ' (BTW: ' + c.vat + ')' : ''}`).join('\n');
+  }
+
+  async function toolTlCreateCompany({ name, vat_number, email, phone, website }) {
+    await tlFetch('/api/companies/create', {
+      method: 'POST', body: JSON.stringify({ name, vat_number, email, phone, website })
+    });
+    return `Bedrijf "${name}" aangemaakt in Teamleader.`;
+  }
+
+  async function toolTlSearchProjects({ query }) {
+    const customers = await tlFetch(`/api/companies/search?q=${encodeURIComponent(query)}`);
+    if (!customers.length) return 'Geen klant gevonden.';
+    const projects = await tlFetch(`/api/projects?customerId=${customers[0].id}`);
+    if (!projects.length) return `Geen open projecten voor ${customers[0].name}.`;
+    return projects.map(p => `• ${p.name} (id: ${p.id})`).join('\n');
+  }
+
   // ── Config ─────────────────────────────────────────────
   const CLIENT_ID  = 'b78985dd-7d7f-4d68-97c6-93b487749a26';
   const TENANT_ID  = 'c2afd855-3cc7-4313-83b1-e0d3f8924000';
@@ -249,6 +322,7 @@
   // ── Boot ────────────────────────────────────────────────
   if (apiKey) document.getElementById('apiOverlay').style.display = 'none';
   initMsal();
+  checkTlConnection();
 
   // ── API key ─────────────────────────────────────────────
   function saveApiKey() {
@@ -412,6 +486,11 @@
       case 'delete_calendar_event': return toolDeleteCalendarEvent(input);
     case 'create_calendar_event': return toolCreateCalendarEvent(input);
       case 'get_emails':           return toolGetEmails(input);
+      case 'tl_search_contacts':   return toolTlSearchContacts(input);
+      case 'tl_create_contact':    return toolTlCreateContact(input);
+      case 'tl_search_companies':  return toolTlSearchCompanies(input);
+      case 'tl_create_company':    return toolTlCreateCompany(input);
+      case 'tl_search_projects':   return toolTlSearchProjects(input);
       case 'archive_email':        return toolArchiveEmail(input);
       case 'send_email':           return toolSendEmail(input);
       default: throw new Error(`Onbekend tool: ${name}`);
@@ -464,6 +543,51 @@
           subject:     { type: 'string',  description: 'Filter op onderwerp' }
         }
       }
+    },
+    {
+      name: 'tl_search_contacts',
+      description: 'Zoek contactpersonen in Teamleader op naam of e-mail.',
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Zoekterm' } }, required: ['query'] }
+    },
+    {
+      name: 'tl_create_contact',
+      description: 'Maak een nieuwe contactpersoon aan in Teamleader.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          first_name:  { type: 'string' },
+          last_name:   { type: 'string' },
+          email:       { type: 'string' },
+          phone:       { type: 'string' },
+          company_id:  { type: 'string', description: 'Teamleader bedrijf ID (optioneel)' }
+        },
+        required: ['first_name', 'last_name']
+      }
+    },
+    {
+      name: 'tl_search_companies',
+      description: 'Zoek bedrijven in Teamleader.',
+      input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
+    },
+    {
+      name: 'tl_create_company',
+      description: 'Maak een nieuw bedrijf aan in Teamleader.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name:        { type: 'string' },
+          vat_number:  { type: 'string' },
+          email:       { type: 'string' },
+          phone:       { type: 'string' },
+          website:     { type: 'string' }
+        },
+        required: ['name']
+      }
+    },
+    {
+      name: 'tl_search_projects',
+      description: 'Zoek open projecten in Teamleader voor een klant.',
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Naam van de klant' } }, required: ['query'] }
     },
     {
       name: 'archive_email',
@@ -564,6 +688,7 @@
 
     const today = new Date().toLocaleDateString('nl-BE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const outlookStatus = msalAccount ? 'De gebruiker is verbonden met Outlook.' : 'De gebruiker is NIET verbonden met Outlook — als hij agenda of e-mail wil, vraag hem dan op de Outlook-knop te klikken.';
+    const tlStatus = tlConnected ? 'De gebruiker is verbonden met Teamleader (CRM). Je kan contacten en bedrijven zoeken of aanmaken, en projecten opzoeken.' : 'De gebruiker is NIET verbonden met Teamleader — als hij CRM-acties wil uitvoeren, vraag hem dan op de Teamleader-knop te klikken.';
 
     try {
       let messages = [...conversationHistory];
@@ -581,7 +706,7 @@
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
             max_tokens: 1024,
-            system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus}`,
+            system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}`,
             tools: CLAUDE_TOOLS,
             messages
           })
