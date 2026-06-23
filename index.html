@@ -309,7 +309,19 @@
 
   function logAdd(category, action, details, undoData) {
     const entries = logLoad();
-    entries.unshift({ id: Date.now(), category, action, details, undoData, ts: new Date().toISOString(), undone: false, _executed: true });
+    entries.unshift({ id: Date.now(), category, action, details, undoData, ts: new Date().toISOString(), undone: false, _executed: true, status: 'ok' });
+    logSave(entries);
+    renderLog();
+  }
+
+  function logAddFailed(toolName, input, errorMsg, errorDetails) {
+    const entries = logLoad();
+    const label = TOOL_LABELS[toolName] || toolName;
+    entries.unshift({
+      id: Date.now(), category: 'Fout', action: label,
+      details: { ...input, '⚠ Fout': errorMsg, ...(errorDetails ? { 'Details': errorDetails } : {}) },
+      undoData: null, ts: new Date().toISOString(), undone: false, _executed: true, status: 'failed'
+    });
     logSave(entries);
     renderLog();
   }
@@ -359,7 +371,16 @@
     }).join('');
   }
 
-  const CATEGORY_COLOR = { Teamleader: '#e8622a', Outlook: '#4a9eff' };
+  const CATEGORY_COLOR = { Teamleader: '#e8622a', Outlook: '#4a9eff', Fout: '#ff4444' };
+
+  const TOOL_LABELS = {
+    tl_create_contact:    'Contact aanmaken',
+    tl_create_company:    'Bedrijf aanmaken',
+    create_calendar_event:'Afspraak aanmaken',
+    delete_calendar_event:'Afspraak verwijderen',
+    send_email:           'E-mail versturen',
+    archive_email:        'E-mail archiveren',
+  };
 
   // ── Approval flow ────────────────────────────────────────
   const WRITE_TOOLS = new Set([
@@ -420,29 +441,46 @@
     const entries = logLoad();
     const body = document.getElementById('tlLogBody');
     const badge = document.getElementById('tlLogBadge');
-    const active = entries.filter(e => !e.undone).length;
-    badge.textContent = active > 0 ? ` (${active})` : '';
     const bottomBadge = document.getElementById('logBottomBadge');
-    if (bottomBadge) bottomBadge.textContent = active > 0 ? ` (${active})` : '';
+    const active = entries.filter(e => !e.undone).length;
+    const hasFailed = entries.some(e => e.status === 'failed');
+
+    // Teller badge (header)
+    badge.textContent = active > 0 ? ` (${active})` : '';
+
+    // Onderste Log-knop: ! bij fouten, anders teller
+    if (bottomBadge) {
+      if (hasFailed) {
+        bottomBadge.textContent = '!';
+        bottomBadge.style.background = '#ff4444';
+      } else {
+        bottomBadge.textContent = active > 0 ? String(active) : '';
+        bottomBadge.style.background = '';
+      }
+      bottomBadge.style.display = (hasFailed || active > 0) ? 'inline-flex' : 'none';
+    }
+
     if (!entries.length) { body.innerHTML = '<div class="tl-log-empty">Nog geen acties geregistreerd.</div>'; return; }
     body.innerHTML = entries.map(e => {
-      const color = CATEGORY_COLOR[e.category] || 'var(--text-dim)';
+      const failed = e.status === 'failed';
+      const color = failed ? '#ff4444' : (CATEGORY_COLOR[e.category] || 'var(--text-dim)');
+      const icon = failed ? '⚠ ' : '';
       const detailLines = Object.entries(e.details || {})
         .filter(([,v]) => v)
-        .map(([k,v]) => `<span style="color:var(--text-dim)">${k}:</span> ${v}`)
+        .map(([k,v]) => `<span style="color:${k.startsWith('⚠') ? '#ff4444' : 'var(--text-dim)'}">${k}:</span> <span style="color:${k.startsWith('⚠') ? '#ff9999' : 'inherit'}">${v}</span>`)
         .join('<br>');
       return `
-      <div class="tl-log-entry" id="logentry-${e.id}">
+      <div class="tl-log-entry" id="logentry-${e.id}" style="${failed ? 'border-left:3px solid #ff4444;padding-left:8px;' : ''}">
         <div class="tl-log-entry-top">
           <div class="tl-log-entry-info">
-            <div class="tl-log-action" style="color:${color}">[${e.category}] ${e.action}</div>
+            <div class="tl-log-action" style="color:${color}">${icon}[${e.category}] ${e.action}</div>
             <div class="tl-log-desc" style="margin-top:4px;line-height:1.6;font-size:11px">${detailLines}</div>
           </div>
           <div class="tl-log-time">${new Date(e.ts).toLocaleString('nl-BE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
         </div>
         ${e.undoData && !e.undone ? `<button class="tl-log-undo" onclick="logUndo(${e.id})">↩ Ongedaan maken</button>` : ''}
         ${e.undone ? `<div style="color:var(--text-dim);font-size:11px;margin-top:6px;">✓ Ongedaan gemaakt</div>` : ''}
-        ${!e.undoData && !e.undone ? `<div style="color:var(--text-dim);font-size:10px;margin-top:6px;">Niet omkeerbaar</div>` : ''}
+        ${!failed && !e.undoData && !e.undone ? `<div style="color:var(--text-dim);font-size:10px;margin-top:6px;">Niet omkeerbaar</div>` : ''}
       </div>`;
     }).join('');
   }
@@ -868,22 +906,35 @@
         }
         return 'De gebruiker heeft geen aanpassing ingesproken. Probeer opnieuw.';
       }
-      // decision === 'ok' → verder met uitvoering
+      // decision === 'ok' → verder met uitvoering, vang fouten op en log ze
+      try {
+        const result = await executeToolDirect(name, input);
+        return result;
+      } catch (err) {
+        const errMsg = err?.message || String(err);
+        const errDetails = err?.details ? JSON.stringify(err.details).substring(0, 200) : '';
+        logAddFailed(name, input, errMsg, errDetails);
+        throw err;
+      }
     }
+    return executeToolDirect(name, input);
+  }
+
+  function executeToolDirect(name, input) {
     switch (name) {
-      case 'get_calendar_events':  return toolGetCalendarEvents(input);
-      case 'delete_calendar_event': return toolDeleteCalendarEvent(input);
-    case 'create_calendar_event': return toolCreateCalendarEvent(input);
-      case 'get_emails':           return toolGetEmails(input);
-      case 'tl_search_contacts':   return toolTlSearchContacts(input);
-      case 'tl_create_contact':    return toolTlCreateContact(input);
-      case 'tl_search_companies':  return toolTlSearchCompanies(input);
-      case 'tl_create_company':    return toolTlCreateCompany(input);
-      case 'tl_search_projects':      return toolTlSearchProjects(input);
-      case 'tl_get_company_contacts':     return toolTlGetCompanyContacts(input);
+      case 'get_calendar_events':       return toolGetCalendarEvents(input);
+      case 'delete_calendar_event':     return toolDeleteCalendarEvent(input);
+      case 'create_calendar_event':     return toolCreateCalendarEvent(input);
+      case 'get_emails':                return toolGetEmails(input);
+      case 'tl_search_contacts':        return toolTlSearchContacts(input);
+      case 'tl_create_contact':         return toolTlCreateContact(input);
+      case 'tl_search_companies':       return toolTlSearchCompanies(input);
+      case 'tl_create_company':         return toolTlCreateCompany(input);
+      case 'tl_search_projects':        return toolTlSearchProjects(input);
+      case 'tl_get_company_contacts':   return toolTlGetCompanyContacts(input);
       case 'suggest_contacts_from_email': return toolSuggestContactsFromEmail(input);
-      case 'archive_email':        return toolArchiveEmail(input);
-      case 'send_email':           return toolSendEmail(input);
+      case 'archive_email':             return toolArchiveEmail(input);
+      case 'send_email':                return toolSendEmail(input);
       default: throw new Error(`Onbekend tool: ${name}`);
     }
   }
