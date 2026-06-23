@@ -437,6 +437,8 @@
   if (apiKey) document.getElementById('apiOverlay').style.display = 'none';
   initMsal();
   checkTlConnection();
+  // Hercheck TL verbinding elke keer de gebruiker terugkeert naar dit tabblad
+  window.addEventListener('focus', () => { if (!tlConnected) checkTlConnection(); });
 
   // ── API key ─────────────────────────────────────────────
   function saveApiKey() {
