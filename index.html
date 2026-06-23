@@ -266,7 +266,21 @@
   function toggleTeamleader() {
     if (tlConnected) { showToast('Teamleader is verbonden'); return; }
     window.open(`${TL_PROXY}/oauth/start?user=${encodeURIComponent(TL_USER)}`, '_blank');
-    showToast('Log in via het geopende venster, daarna herlaad de pagina');
+    showToast('Log in via het geopende venster...');
+    // Poll elke 2s tot max 60s om verbinding automatisch te detecteren
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        await tlFetch('/api/users');
+        tlConnected = true;
+        updateTlBtn();
+        showToast('Teamleader verbonden!');
+        clearInterval(poll);
+      } catch {
+        if (attempts >= 30) clearInterval(poll);
+      }
+    }, 2000);
   }
 
   // ── Teamleader tool helpers ──────────────────────────────
