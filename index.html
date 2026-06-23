@@ -618,8 +618,13 @@
       const addr = msg.from?.emailAddress?.address?.toLowerCase() || '';
       const name = msg.from?.emailAddress?.name || '';
       if (!addr || seen.has(addr)) continue;
-      if (addr.includes('noreply') || addr.includes('no-reply')) continue;
+      // Filter spam, nieuwsbrieven, systeem-adressen
+      const spamPatterns = ['noreply','no-reply','newsletter','nieuwsbrief','donotreply',
+        'notification','info@','support@','team@','account@','reminder@','mail@',
+        'billing@','invoice@','hello@','contact@','tips@','pkginfo','focus@'];
+      if (spamPatterns.some(p => addr.includes(p))) continue;
       if (addr.includes('@nivosystems') || addr.includes('@nivo')) continue;
+      if (!name || name.trim().length < 3) continue; // geen naam = geen contact
       seen.add(addr);
       senders.push({ name, email: addr });
     }
