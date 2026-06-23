@@ -625,15 +625,19 @@
     }
     if (!senders.length) return 'Geen relevante afzenders gevonden.';
 
-    // Check welke al in Teamleader staan
+    // Check welke al in Teamleader staan (zoek op e-mail EN op naam)
     const nieuw = [];
     for (const s of senders) {
       try {
-        const found = await tlFetch(`/api/contacts/search?q=${encodeURIComponent(s.email)}`);
-        if (!found.length) {
-          const domain = s.email.split('@')[1] || '';
-          nieuw.push({ ...s, domain });
-        }
+        const byEmail = await tlFetch(`/api/contacts/search?q=${encodeURIComponent(s.email)}`);
+        if (byEmail.length) continue; // al gevonden via e-mail
+        const byName = await tlFetch(`/api/contacts/search?q=${encodeURIComponent(s.name)}`);
+        const nameMatch = byName.some(c => {
+          const tlName = c.name?.toLowerCase() || '';
+          const sName = s.name?.toLowerCase() || '';
+          return tlName === sName || tlName.includes(sName) || sName.includes(tlName);
+        });
+        if (!nameMatch) nieuw.push({ ...s, domain: s.email.split('@')[1] || '' });
       } catch { /* skip */ }
     }
 
@@ -1178,7 +1182,7 @@
             max_tokens: 1024,
             system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}
 
-Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag dan naar het BEDRIJF en gebruik get_emails met de bedrijfsnaam als zoekterm. Toon dan de gevonden afzenders als lijst en laat de gebruiker kiezen. Gebruik daarna include_body:true op de gekozen persoon. Extraheer uit de handtekening: voornaam, achternaam, e-mail, vast telefoonnummer (phone), gsm (mobile), functie (function_title), bedrijf. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst. Gebruik tl_search_companies voor company_id. Stel nooit een contact voor zonder e-mailadres.`,
+Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag naar het BEDRIJF en gebruik suggest_contacts_from_email met de bedrijfsnaam als company parameter. ALTIJD de resultaten tonen als genummerde lijst (1. Naam — email) zodat de gebruiker kan klikken. Gebruik daarna get_emails met include_body:true op de gekozen persoon om handtekening te lezen. Extraheer: voornaam, achternaam, e-mail, vast telefoonnummer (phone), gsm (mobile), functie (function_title), bedrijf. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst. Gebruik tl_search_companies voor company_id (stuur altijd de UUID door, nooit de naam). Stel nooit een contact voor zonder e-mailadres. Als suggest_contacts_from_email een lijst geeft, toon die ALTIJD als genummerde lijst — nooit samenvatten.`,
             tools: CLAUDE_TOOLS,
             messages
           })
