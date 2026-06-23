@@ -370,14 +370,35 @@
 
   let approvalResolve = null;
 
+  const CONTACT_FIELD_LABELS = {
+    first_name: 'Voornaam', last_name: 'Achternaam', email: 'E-mail',
+    phone: 'Telefoon', mobile: 'GSM', function_title: 'Functie', company_id: 'Bedrijf'
+  };
+  const CONTACT_REQUIRED_FIELDS = ['first_name','last_name','email'];
+  const CONTACT_ALL_FIELDS = ['first_name','last_name','email','phone','mobile','function_title','company_id'];
+
   function requestApproval(toolName, input) {
     return new Promise(resolve => {
       approvalResolve = resolve;
       const panel = document.getElementById('approvalPanel');
       document.getElementById('approvalAction').textContent = TOOL_LABELS[toolName] || toolName;
-      document.getElementById('approvalDetails').innerHTML = Object.entries(input)
-        .filter(([,v]) => v !== undefined && v !== '')
-        .map(([k,v]) => `<b>${k}:</b> ${v}`).join('<br>');
+
+      let html = '';
+      if (toolName === 'tl_create_contact') {
+        html = CONTACT_ALL_FIELDS.map(f => {
+          const label = CONTACT_FIELD_LABELS[f] || f;
+          const val = input[f];
+          const required = CONTACT_REQUIRED_FIELDS.includes(f);
+          const display = val || `<span style="color:#ff6b6b;font-style:italic">${required ? '⚠ Verplicht — ontbreekt' : 'Niet gevonden'}</span>`;
+          return `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-dim);min-width:90px">${label}</span><span>${display}</span></div>`;
+        }).join('');
+      } else {
+        html = Object.entries(input)
+          .filter(([,v]) => v !== undefined && v !== '')
+          .map(([k,v]) => `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-dim);min-width:90px">${k}</span><span>${v}</span></div>`)
+          .join('');
+      }
+      document.getElementById('approvalDetails').innerHTML = html;
       panel.classList.add('visible');
     });
   }
@@ -499,15 +520,16 @@
     return data.map(c => `• ${c.name}${c.company ? ' (' + c.company + ')' : ''} — ${c.email}`).join('\n');
   }
 
-  async function toolTlCreateContact({ first_name, last_name, email, company_id, phone }) {
+  async function toolTlCreateContact({ first_name, last_name, email, company_id, phone, mobile, function_title }) {
     const data = await tlFetch('/api/contacts/create', {
-      method: 'POST', body: JSON.stringify({ first_name, last_name, email, company_id, phone })
+      method: 'POST', body: JSON.stringify({ first_name, last_name, email, company_id, phone, mobile, function_title })
     });
     const resourceId = data?.id || data?.data?.id;
     logAdd('Teamleader', 'Contact aangemaakt', {
-      'Naam': `${first_name} ${last_name}`,
-      'E-mail': email || '',
-      'Telefoon': phone || '',
+      'Voornaam': first_name, 'Achternaam': last_name,
+      'E-mail': email || '', 'Telefoon': phone || '',
+      'GSM': mobile || '', 'Functie': function_title || '',
+      'Bedrijf': company_id || '',
     }, resourceId ? { type: 'tl_contact', id: resourceId } : null);
     return `Contact ${first_name} ${last_name} aangemaakt in Teamleader.`;
   }
@@ -907,17 +929,19 @@
     },
     {
       name: 'tl_create_contact',
-      description: 'Maak een nieuwe contactpersoon aan in Teamleader.',
+      description: 'Maak een nieuwe contactpersoon aan in Teamleader. Verplicht: first_name, last_name, email. Sterk gewenst: phone, mobile, function_title, company_id. Zoek altijd eerst naar alle velden voor je dit aanroept.',
       input_schema: {
         type: 'object',
         properties: {
-          first_name:  { type: 'string' },
-          last_name:   { type: 'string' },
-          email:       { type: 'string' },
-          phone:       { type: 'string' },
-          company_id:  { type: 'string', description: 'Teamleader bedrijf ID (optioneel)' }
+          first_name:     { type: 'string', description: 'Voornaam (verplicht)' },
+          last_name:      { type: 'string', description: 'Achternaam (verplicht)' },
+          email:          { type: 'string', description: 'E-mailadres (verplicht)' },
+          phone:          { type: 'string', description: 'Vast telefoonnummer' },
+          mobile:         { type: 'string', description: 'GSM-nummer' },
+          function_title: { type: 'string', description: 'Functie/titel bv. Project manager' },
+          company_id:     { type: 'string', description: 'Teamleader bedrijf ID — gebruik tl_search_companies om dit op te zoeken' }
         },
-        required: ['first_name', 'last_name']
+        required: ['first_name', 'last_name', 'email']
       }
     },
     {
@@ -1092,7 +1116,7 @@
             max_tokens: 1024,
             system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}
 
-Werkwijze contactgegevens uit e-mail halen: gebruik get_emails met de naam als 'from' parameter EN include_body:true EN count:5. Lees de volledige e-mailtekst en handtekening. Extraheer: naam, e-mailadres, telefoonnummer, functie, bedrijf. Een contact mag je ALLEEN aanmaken als je minstens naam EN e-mailadres hebt. Telefoonnummer en functie zijn sterk gewenst — zoek door meerdere e-mails als nodig. Gebruik tl_search_companies om het bedrijf te linken via company_id. Voeg nooit een contact toe zonder e-mailadres.`,
+Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag dan naar het BEDRIJF en gebruik get_emails met de bedrijfsnaam als zoekterm. Toon dan de gevonden afzenders als lijst en laat de gebruiker kiezen. Gebruik daarna include_body:true op de gekozen persoon. Extraheer uit de handtekening: voornaam, achternaam, e-mail, vast telefoonnummer (phone), gsm (mobile), functie (function_title), bedrijf. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst. Gebruik tl_search_companies voor company_id. Stel nooit een contact voor zonder e-mailadres.`,
             tools: CLAUDE_TOOLS,
             messages
           })
