@@ -385,7 +385,7 @@
   // ── Approval flow ────────────────────────────────────────
   const WRITE_TOOLS = new Set([
     'create_calendar_event','delete_calendar_event','send_email','archive_email',
-    'tl_create_contact','tl_create_company'
+    'tl_create_contact','tl_create_company','move_email_to_folder','tl_add_deal_note'
   ]);
 
   let approvalResolve = null;
@@ -886,6 +886,76 @@
     return `E-mail "${subject}" verstuurd naar ${to}.`;
   }
 
+  // ── Mailmappen ──────────────────────────────────────────
+  async function toolListEmailFolders() {
+    const data = await graphCall('/me/mailFolders?$top=50&$select=displayName,totalItemCount,unreadItemCount');
+    if (!data.value.length) return 'Geen mappen gevonden.';
+    return data.value
+      .map(f => `${f.displayName} (${f.unreadItemCount} ongelezen / ${f.totalItemCount} totaal)`)
+      .join('\n');
+  }
+
+  async function toolMoveEmailToFolder({ subject, from, folder_name }) {
+    // 1. Zoek of de map al bestaat
+    const folders = await graphCall('/me/mailFolders?$top=100&$select=id,displayName');
+    let folder = folders.value.find(f => f.displayName.toLowerCase() === folder_name.toLowerCase());
+
+    // 2. Maak map aan als die niet bestaat
+    if (!folder) {
+      folder = await graphCall('/me/mailFolders', 'POST', { displayName: folder_name });
+    }
+
+    // 3. Zoek de e-mail
+    let filter = '';
+    if (subject) filter += `contains(subject,'${subject.replace(/'/g, '')}')`;
+    if (subject && from) filter += ' and ';
+    if (from) filter += `contains(from/emailAddress/address,'${from}') or contains(from/emailAddress/name,'${from}')`;
+    const url = `/me/messages?$top=5&$select=id,subject,from,receivedDateTime${filter ? '&$filter=' + encodeURIComponent(filter) : '&$orderby=receivedDateTime desc'}`;
+    const data = await graphCall(url);
+    if (!data.value.length) return `Geen e-mail gevonden${subject ? ' met onderwerp "' + subject + '"' : ''}.`;
+    const msg = data.value[0];
+
+    // 4. Verplaats
+    await graphCall(`/me/messages/${msg.id}/move`, 'POST', { destinationId: folder.id });
+    logAdd('Outlook', 'E-mail verplaatst', {
+      'Onderwerp': msg.subject,
+      'Van': msg.from.emailAddress.name,
+      'Naar map': folder_name,
+    }, { type: 'outlook_archive', id: msg.id });
+    return `E-mail "${msg.subject}" verplaatst naar map "${folder_name}".`;
+  }
+
+  // ── Teamleader deals & notities ─────────────────────────
+  async function toolTlGetDeals({ query }) {
+    const data = await tlFetch(`/api/deals/search?q=${encodeURIComponent(query)}`);
+    if (!data.length) return `Geen open deals gevonden voor "${query}".`;
+    return data.map((d, i) => `${i+1}. [${d.id}] ${d.title} — ${d.status}`).join('\n');
+  }
+
+  async function toolTlAddDealNote({ deal_id, note }) {
+    await tlFetch('/api/deals/note', {
+      method: 'POST',
+      body: JSON.stringify({ deal_id, note })
+    });
+    logAdd('Teamleader', 'Notitie toegevoegd aan deal', { 'Deal ID': deal_id, 'Notitie': note.substring(0, 100) }, null);
+    return `Notitie toegevoegd aan deal ${deal_id}.`;
+  }
+
+  async function toolTlGetCompanyInfo({ company_name }) {
+    const companies = await tlFetch(`/api/companies/search?q=${encodeURIComponent(company_name)}`);
+    if (!companies.length) return `Bedrijf "${company_name}" niet gevonden in Teamleader.`;
+    const c = companies[0];
+    const contacts = await tlFetch(`/api/contacts/search?company_id=${c.id}`);
+    const deals = await tlFetch(`/api/deals/search?q=${encodeURIComponent(company_name)}`).catch(() => []);
+    const contactList = contacts.length
+      ? contacts.map(ct => `  • ${ct.name} ${ct.email ? '<' + ct.email + '>' : ''}`).join('\n')
+      : '  (geen contacten)';
+    const dealList = deals.length
+      ? deals.slice(0, 5).map(d => `  • ${d.title} [${d.status}]`).join('\n')
+      : '  (geen deals)';
+    return `${c.name} (BTW: ${c.vat || 'onbekend'})\n\nContacten:\n${contactList}\n\nDeals:\n${dealList}`;
+  }
+
   async function executeTool(name, input) {
     // Schrijf-acties vragen eerst goedkeuring
     if (WRITE_TOOLS.has(name)) {
@@ -935,6 +1005,11 @@
       case 'suggest_contacts_from_email': return toolSuggestContactsFromEmail(input);
       case 'archive_email':             return toolArchiveEmail(input);
       case 'send_email':                return toolSendEmail(input);
+      case 'move_email_to_folder':      return toolMoveEmailToFolder(input);
+      case 'list_email_folders':        return toolListEmailFolders(input);
+      case 'tl_get_deals':             return toolTlGetDeals(input);
+      case 'tl_add_deal_note':         return toolTlAddDealNote(input);
+      case 'tl_get_company_info':      return toolTlGetCompanyInfo(input);
       default: throw new Error(`Onbekend tool: ${name}`);
     }
   }
@@ -1070,6 +1145,58 @@
         },
         required: ['to', 'subject', 'body']
       }
+    },
+    {
+      name: 'move_email_to_folder',
+      description: 'Verplaats een e-mail naar een specifieke map in Outlook. Maakt de map aan als die nog niet bestaat. Gebruik voor organisatie per klant of project.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          subject:     { type: 'string', description: 'Onderwerp of deel ervan om de mail te vinden' },
+          from:        { type: 'string', description: 'Afzender naam of e-mail (optioneel)' },
+          folder_name: { type: 'string', description: 'Naam van de doelmap, bv. "Astra Sweets" of "Project X"' }
+        },
+        required: ['folder_name']
+      }
+    },
+    {
+      name: 'list_email_folders',
+      description: 'Geef een overzicht van alle e-mailmappen in Outlook.',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'tl_get_deals',
+      description: 'Haal open deals/projecten op uit Teamleader voor een klant of zoekterm.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Klantnaam of dealomschrijving' }
+        },
+        required: ['query']
+      }
+    },
+    {
+      name: 'tl_add_deal_note',
+      description: 'Voeg een notitie toe aan een deal in Teamleader, bv. samenvatting van een e-mail of vergadering.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          deal_id: { type: 'string', description: 'Teamleader deal ID' },
+          note:    { type: 'string', description: 'Inhoud van de notitie' }
+        },
+        required: ['deal_id', 'note']
+      }
+    },
+    {
+      name: 'tl_get_company_info',
+      description: 'Haal volledige bedrijfsinfo op uit Teamleader: adres, BTW, contactpersonen, openstaande deals.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          company_name: { type: 'string', description: 'Naam van het bedrijf' }
+        },
+        required: ['company_name']
+      }
     }
   ];
 
@@ -1186,7 +1313,9 @@
             max_tokens: 1024,
             system: `Je bent een vriendelijke rijassistent in een Tesla. De gebruiker spreekt je aan terwijl hij rijdt. Antwoorden zijn altijd: kort (max 3 zinnen), direct bruikbaar, en in het Nederlands. Gebruik NOOIT markdown-opmaak zoals **, *, #, of backticks — schrijf altijd gewone platte tekst. Geen lange lijsten. Bevestig een actie ALLEEN nadat je de bijhorende tool hebt aangeroepen en een resultaat hebt gekregen. Stel één vervolgvraag als iets onduidelijk is. Vandaag is het ${today}. ${outlookStatus} ${tlStatus}
 
-Werkwijze contacten toevoegen: gebruik suggest_contacts_from_email (met company filter indien van toepassing). De tool geeft een genummerde lijst — kopieer die lijst LETTERLIJK in je antwoord, voeg niets samen, vat niets samen. Als de gebruiker daarna "ja" of een naam of nummer zegt, voeg dan DIE persoon toe — zoek NIET opnieuw in e-mails tenzij je de handtekening nog nodig hebt. Gebruik get_emails met include_body:true alleen om extra gegevens (telefoon, functie) op te halen van de gekozen persoon. Gebruik tl_search_companies om de company_id (UUID) op te zoeken — stuur nooit de bedrijfsnaam als company_id. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst.`,
+Werkwijze contacten toevoegen: gebruik suggest_contacts_from_email (met company filter indien van toepassing). De tool geeft een genummerde lijst — kopieer die lijst LETTERLIJK in je antwoord, voeg niets samen, vat niets samen. Als de gebruiker daarna "ja" of een naam of nummer zegt, voeg dan DIE persoon toe — zoek NIET opnieuw in e-mails tenzij je de handtekening nog nodig hebt. Gebruik get_emails met include_body:true alleen om extra gegevens (telefoon, functie) op te halen van de gekozen persoon. Gebruik tl_search_companies om de company_id (UUID) op te zoeken — stuur nooit de bedrijfsnaam als company_id. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst.
+
+Mailorganisatie: gebruik move_email_to_folder om e-mails per klant of project te sorteren. Gebruik list_email_folders voor een overzicht. Bij vragen over een klant gebruik tl_get_company_info voor volledig overzicht (contacten + deals). Gebruik tl_get_deals om deals op te zoeken en tl_add_deal_note om e-mailsamenvattingen of vergadernotities aan een deal te koppelen.`,
             tools: CLAUDE_TOOLS,
             messages
           })
