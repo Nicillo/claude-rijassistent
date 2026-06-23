@@ -164,15 +164,17 @@
   .approval-btn.ok    { background: #1a4a2e; color: #3ddc84; border: 1px solid #3ddc84; }
   .approval-btn.nok   { background: #4a1a1a; color: #ff6b6b; border: 1px solid #ff6b6b; }
   .approval-btn.edit  { background: #1a2a4a; color: #4a9eff; border: 1px solid #4a9eff; }
-  /* ── Bottom log button ── */
-  .bottom-bar { display: flex; align-items: center; justify-content: center; width: 100%; }
-  .log-bottom-btn {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
-    padding: 7px 18px; color: var(--text-dim); font-size: 12px; font-family: inherit;
-    cursor: pointer; display: flex; align-items: center; gap: 6px;
-    -webkit-tap-highlight-color: transparent;
+  /* ── Bottom bar knoppen ── */
+  .bottom-bar { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
+  .bottom-bar-btn {
+    flex: 1; border-radius: 12px; padding: 12px 10px; font-size: 13px; font-weight: 600;
+    font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    gap: 6px; transition: all 0.15s; -webkit-tap-highlight-color: transparent; outline: none;
   }
-  .log-bottom-btn:active { border-color: var(--accent); color: var(--text); }
+  .bottom-bar-btn.approval { background: var(--surface2); border: 1px solid var(--accent); color: var(--accent); }
+  .bottom-bar-btn.approval:active { background: var(--accent); color: #fff; }
+  .bottom-bar-btn.history { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
+  .bottom-bar-btn.history:active { border-color: var(--blue); color: var(--blue); }
   .api-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.9);
     display: flex; align-items: center; justify-content: center; z-index: 100;
@@ -205,15 +207,26 @@
 </head>
 <body>
 
-<!-- TL Log paneel -->
-<div class="tl-log-overlay" id="tlLogOverlay" onclick="closeTlLog()"></div>
+<!-- Log / Goedkeuringen paneel (actieve items) -->
+<div class="tl-log-overlay" id="tlLogOverlay" onclick="closeTlLog(); closeHistory();"></div>
 <div class="tl-log-panel" id="tlLogPanel">
   <div class="tl-log-header">
-    <h3>Teamleader wijzigingen</h3>
+    <h3>⏳ Goedkeuringen</h3>
     <button class="tl-log-close" onclick="closeTlLog()">×</button>
   </div>
   <div class="tl-log-body" id="tlLogBody">
-    <div class="tl-log-empty">Nog geen wijzigingen geregistreerd.</div>
+    <div class="tl-log-empty">Nog geen acties geregistreerd.</div>
+  </div>
+</div>
+
+<!-- Verleden paneel (uitgevoerde + ongedaan gemaakte acties) -->
+<div class="tl-log-panel" id="historyPanel" style="left:0;right:auto;border-right:1px solid var(--border);border-left:none;">
+  <div class="tl-log-header">
+    <h3>📋 Verleden</h3>
+    <button class="tl-log-close" onclick="closeHistory()">×</button>
+  </div>
+  <div class="tl-log-body" id="historyBody">
+    <div class="tl-log-empty">Nog geen uitgevoerde acties.</div>
   </div>
 </div>
 
@@ -278,7 +291,8 @@
   </div>
 
   <div class="bottom-bar">
-    <button class="log-bottom-btn" onclick="openTlLog()">📋 Log <span id="logBottomBadge"></span></button>
+    <button class="bottom-bar-btn approval" onclick="openTlLog()">⏳ Goedkeuringen <span id="logBottomBadge"></span></button>
+    <button class="bottom-bar-btn history" onclick="openHistory()">📋 Verleden</button>
   </div>
 </div>
 
@@ -296,13 +310,40 @@
 
   function logAdd(category, action, details, undoData) {
     const entries = logLoad();
-    entries.unshift({ id: Date.now(), category, action, details, undoData, ts: new Date().toISOString(), undone: false });
+    entries.unshift({ id: Date.now(), category, action, details, undoData, ts: new Date().toISOString(), undone: false, _executed: true });
     logSave(entries);
     renderLog();
   }
 
   function openTlLog()  { document.getElementById('tlLogPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderLog(); }
   function closeTlLog() { document.getElementById('tlLogPanel').classList.remove('open'); document.getElementById('tlLogOverlay').style.display = 'none'; }
+  function openHistory()  { document.getElementById('historyPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderHistory(); }
+  function closeHistory() { document.getElementById('historyPanel').classList.remove('open'); document.getElementById('tlLogOverlay').style.display = 'none'; }
+
+  function renderHistory() {
+    const entries = logLoad();
+    const body = document.getElementById('historyBody');
+    const done = entries.filter(e => e.undone || e._executed);
+    if (!done.length) { body.innerHTML = '<div class="tl-log-empty">Nog geen uitgevoerde acties.</div>'; return; }
+    body.innerHTML = done.map(e => {
+      const color = CATEGORY_COLOR[e.category] || 'var(--text-dim)';
+      const detailLines = Object.entries(e.details || {}).filter(([,v]) => v)
+        .map(([k,v]) => `<span style="color:var(--text-dim)">${k}:</span> ${v}`).join('<br>');
+      return `
+      <div class="tl-log-entry" id="histentry-${e.id}">
+        <div class="tl-log-entry-top">
+          <div class="tl-log-entry-info">
+            <div class="tl-log-action" style="color:${color}">[${e.category}] ${e.action}</div>
+            <div class="tl-log-desc" style="margin-top:4px;line-height:1.6;font-size:11px">${detailLines}</div>
+          </div>
+          <div class="tl-log-time">${new Date(e.ts).toLocaleString('nl-BE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        ${e.undoData && !e.undone ? `<button class="tl-log-undo" onclick="logUndo(${e.id}); renderHistory();">↩ Ongedaan maken</button>` : ''}
+        ${e.undone ? `<div style="color:var(--text-dim);font-size:11px;margin-top:6px;">✓ Ongedaan gemaakt</div>` : ''}
+        ${!e.undoData ? `<div style="color:var(--text-dim);font-size:10px;margin-top:6px;">Niet omkeerbaar</div>` : ''}
+      </div>`;
+    }).join('');
+  }
 
   const CATEGORY_COLOR = { Teamleader: '#e8622a', Outlook: '#4a9eff' };
 
@@ -492,6 +533,43 @@
     const projects = await tlFetch(`/api/projects?customerId=${customers[0].id}`);
     if (!projects.length) return `Geen open projecten voor ${customers[0].name}.`;
     return projects.map(p => `• ${p.name} (id: ${p.id})`).join('\n');
+  }
+
+  async function toolSuggestContactsFromEmail({ count = 20 }) {
+    // Haal recente e-mail afzenders op
+    const data = await graphCall(`/me/messages?$top=${count}&$orderby=receivedDateTime desc&$select=subject,from,receivedDateTime`);
+    if (!data.value.length) return 'Geen e-mails gevonden.';
+
+    // Unieke afzenders (geen eigen adres, geen noreply)
+    const seen = new Set();
+    const senders = [];
+    for (const msg of data.value) {
+      const addr = msg.from?.emailAddress?.address?.toLowerCase() || '';
+      const name = msg.from?.emailAddress?.name || '';
+      if (!addr || seen.has(addr) || addr.includes('noreply') || addr.includes('no-reply') || addr.includes('nicillo') || addr.includes('nivo')) continue;
+      seen.add(addr);
+      senders.push({ name, email: addr, subject: msg.subject });
+    }
+    if (!senders.length) return 'Geen nieuwe afzenders gevonden.';
+
+    // Check welke al in Teamleader staan
+    const nieuw = [];
+    for (const s of senders) {
+      try {
+        const found = await tlFetch(`/api/contacts/search?q=${encodeURIComponent(s.email)}`);
+        if (!found.length) {
+          // Bepaal bedrijfsnaam uit e-maildomein
+          const domain = s.email.split('@')[1]?.replace('www.', '') || '';
+          const domainName = domain.split('.')[0];
+          nieuw.push({ ...s, domain, domainName });
+        }
+      } catch { /* skip */ }
+    }
+
+    if (!nieuw.length) return 'Alle recente afzenders staan al in Teamleader.';
+    return `${nieuw.length} afzender(s) nog niet in Teamleader:\n` +
+      nieuw.map(c => `• ${c.name} <${c.email}> (waarschijnlijk: ${c.domainName})`).join('\n') +
+      '\n\nWil je ze toevoegen? Ik kan ze één voor één voorstellen.';
   }
 
   async function toolTlGetCompanyContacts({ company_name }) {
@@ -735,7 +813,8 @@
       case 'tl_search_companies':  return toolTlSearchCompanies(input);
       case 'tl_create_company':    return toolTlCreateCompany(input);
       case 'tl_search_projects':      return toolTlSearchProjects(input);
-      case 'tl_get_company_contacts': return toolTlGetCompanyContacts(input);
+      case 'tl_get_company_contacts':     return toolTlGetCompanyContacts(input);
+      case 'suggest_contacts_from_email': return toolSuggestContactsFromEmail(input);
       case 'archive_email':        return toolArchiveEmail(input);
       case 'send_email':           return toolSendEmail(input);
       default: throw new Error(`Onbekend tool: ${name}`);
@@ -835,6 +914,11 @@
       input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Naam van de klant' } }, required: ['query'] }
     },
     {
+      name: 'suggest_contacts_from_email',
+      description: 'Analyseer recente e-mail afzenders en stel voor welke nog niet in Teamleader staan zodat de gebruiker ze kan toevoegen.',
+      input_schema: { type: 'object', properties: { count: { type: 'number', description: 'Aantal recente e-mails om te scannen (standaard 20)' } }, required: [] }
+    },
+    {
       name: 'tl_get_company_contacts',
       description: 'Haal alle contactpersonen op die gekoppeld zijn aan een specifiek bedrijf in Teamleader. Gebruik dit als de gebruiker vraagt welke contacten er bij een bedrijf horen.',
       input_schema: { type: 'object', properties: { company_name: { type: 'string', description: 'Naam van het bedrijf' } }, required: ['company_name'] }
@@ -866,16 +950,33 @@
   ];
 
   // ── Speech ──────────────────────────────────────────────
+  let silenceTimer = null;
+  const SILENCE_MS = 2200; // wacht 2.2s stilte voor verzenden
+
   function setupRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast('Spraakherkenning niet beschikbaar'); return null; }
     const r = new SR();
     r.lang = 'nl-NL';
-    r.continuous = false;
-    r.interimResults = false;
-    r.onresult = (e) => { stopListening(); handleUserInput(e.results[0][0].transcript); };
-    r.onerror  = (e) => { stopListening(); if (e.error !== 'aborted') showToast('Fout: ' + e.error); };
-    r.onend    = () => { if (isListening) stopListening(); };
+    r.continuous = true;
+    r.interimResults = true;
+    let finalTranscript = '';
+
+    r.onresult = (e) => {
+      clearTimeout(silenceTimer);
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+        else interim = e.results[i][0].transcript;
+      }
+      // Na SILENCE_MS stilte → verwerk
+      silenceTimer = setTimeout(() => {
+        const text = (finalTranscript + interim).trim();
+        if (text) { stopListening(); handleUserInput(text); }
+      }, SILENCE_MS);
+    };
+    r.onerror = (e) => { stopListening(); if (e.error !== 'aborted' && e.error !== 'no-speech') showToast('Fout: ' + e.error); };
+    r.onend   = () => { if (isListening) { try { r.start(); } catch {} } }; // herstart bij auto-stop
     return r;
   }
 
@@ -900,6 +1001,7 @@
 
   function stopListening() {
     isListening = false;
+    clearTimeout(silenceTimer);
     if (recognition) { recognition.abort(); recognition = null; }
     document.getElementById('micBtn').classList.remove('listening');
     document.getElementById('micHint').classList.remove('active');
