@@ -567,13 +567,15 @@
       method: 'POST', body: JSON.stringify({ first_name, last_name, email, company_id, phone, mobile, function_title })
     });
     const resourceId = data?.id || data?.data?.id;
+    const warning = data?._warning || '';
     logAdd('Teamleader', 'Contact aangemaakt', {
       'Voornaam': first_name, 'Achternaam': last_name,
       'E-mail': email || '', 'Telefoon': phone || '',
       'GSM': mobile || '', 'Functie': function_title || '',
-      'Bedrijf': company_id || '',
+      'Bedrijf': company_id || (warning ? '⚠ niet gekoppeld' : ''),
     }, resourceId ? { type: 'tl_contact', id: resourceId } : null);
-    return `Contact ${first_name} ${last_name} aangemaakt in Teamleader.`;
+    const base = `Contact ${first_name} ${last_name} aangemaakt in Teamleader.`;
+    return warning ? `${base} Waarschuwing: ${warning}` : base;
   }
 
   async function toolTlSearchCompanies({ query }) {
