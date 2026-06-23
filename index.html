@@ -490,7 +490,10 @@
     try {
       const u = entry.undoData;
       if (u.type === 'tl_contact')  await tlFetch(`/api/contacts/${u.id}`, { method: 'DELETE' });
-      if (u.type === 'tl_company')  await tlFetch(`/api/companies/${u.id}`, { method: 'DELETE' });
+      if (u.type === 'tl_company') {
+        const delResult = await tlFetch(`/api/companies/${u.id}`, { method: 'DELETE' });
+        if (delResult?.blocked) throw new Error(delResult.error);
+      }
       if (u.type === 'outlook_event') await graphCall(`/me/events/${u.id}`, 'DELETE');
       if (u.type === 'outlook_archive') await graphCall(`/me/messages/${u.id}/move`, 'POST', { destinationId: 'inbox' });
       entry.undone = true;
