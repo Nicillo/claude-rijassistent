@@ -1159,6 +1159,8 @@
     hideEmptyState();
     addMessage('user', text);
     conversationHistory.push({ role: 'user', content: text });
+    // Houd geschiedenis beperkt zodat de context niet te groot wordt
+    if (conversationHistory.length > 30) conversationHistory = conversationHistory.slice(-20);
     setProcessing(true);
     const thinkingEl = addThinking();
 
@@ -1222,7 +1224,13 @@ Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag 
       }
     } catch (err) {
       thinkingEl.remove();
-      showToast('Verbindingsfout — controleer internet');
+      const msg = err?.message || String(err);
+      if (msg.includes('rate') || msg.includes('overloaded') || msg.includes('529') || msg.includes('529')) {
+        addMessage('assistant', 'Te veel verzoeken in korte tijd. Ik verwijder de oudste berichten en probeer opnieuw — spreek je vraag nog eens in.');
+        if (conversationHistory.length > 6) conversationHistory = conversationHistory.slice(-6);
+      } else {
+        showToast('Verbindingsfout — ' + msg.substring(0, 80));
+      }
     }
 
     setProcessing(false);
@@ -1287,7 +1295,9 @@ Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag 
           // Toon enkel het eerste deel (voor lange regels)
           btn.textContent = opt.length > 50 ? opt.substring(0, 48) + '…' : opt;
           btn.onclick = () => {
-            // Verwijder alle chips na klik
+            if (btn.disabled) return;
+            chips.querySelectorAll('.option-chip').forEach(b => b.disabled = true);
+            chips.style.opacity = '0.4';
             chips.remove();
             handleUserInput(opt);
           };
