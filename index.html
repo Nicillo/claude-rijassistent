@@ -385,7 +385,7 @@
   // ── Approval flow ────────────────────────────────────────
   const WRITE_TOOLS = new Set([
     'create_calendar_event','delete_calendar_event','send_email','archive_email',
-    'tl_create_contact','tl_create_company','move_email_to_folder','tl_add_deal_note'
+    'tl_create_contact','tl_create_company','move_email_to_folder','tl_add_deal_note','tl_create_deal'
   ]);
 
   let approvalResolve = null;
@@ -956,6 +956,22 @@
     return `${c.name} (BTW: ${c.vat || 'onbekend'})\n\nContacten:\n${contactList}\n\nDeals:\n${dealList}`;
   }
 
+  async function toolTlCreateDeal({ title, company_name, summary }) {
+    const companies = await tlFetch(`/api/companies/search?q=${encodeURIComponent(company_name)}`);
+    if (!companies.length) return `Bedrijf "${company_name}" niet gevonden in Teamleader.`;
+    const company = companies[0];
+    const data = await tlFetch('/api/deals/create', {
+      method: 'POST',
+      body: JSON.stringify({ title, company_id: company.id, summary })
+    });
+    logAdd('Teamleader', 'Deal aangemaakt', {
+      'Titel': title,
+      'Klant': company.name,
+      'Omschrijving': summary || '',
+    }, { type: 'tl_deal', id: data.id });
+    return `Deal "${title}" aangemaakt voor ${company.name}.`;
+  }
+
   async function executeTool(name, input) {
     // Schrijf-acties vragen eerst goedkeuring
     if (WRITE_TOOLS.has(name)) {
@@ -1010,6 +1026,7 @@
       case 'tl_get_deals':             return toolTlGetDeals(input);
       case 'tl_add_deal_note':         return toolTlAddDealNote(input);
       case 'tl_get_company_info':      return toolTlGetCompanyInfo(input);
+      case 'tl_create_deal':           return toolTlCreateDeal(input);
       default: throw new Error(`Onbekend tool: ${name}`);
     }
   }
@@ -1196,6 +1213,19 @@
           company_name: { type: 'string', description: 'Naam van het bedrijf' }
         },
         required: ['company_name']
+      }
+    },
+    {
+      name: 'tl_create_deal',
+      description: 'Maak een nieuwe deal/offerte aan in Teamleader voor een klant.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title:        { type: 'string', description: 'Titel van de deal' },
+          company_name: { type: 'string', description: 'Naam van het klantenbedrijf' },
+          summary:      { type: 'string', description: 'Korte omschrijving (optioneel)' }
+        },
+        required: ['title', 'company_name']
       }
     }
   ];
