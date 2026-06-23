@@ -268,59 +268,71 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
 <script>
-  // ── TL Wijzigingslog ────────────────────────────────────
-  const TL_LOG_KEY = 'tl_action_log';
+  // ── Actie-log (Teamleader + Outlook) ────────────────────
+  const ACTION_LOG_KEY = 'action_log';
 
-  function tlLogLoad() {
-    try { return JSON.parse(localStorage.getItem(TL_LOG_KEY) || '[]'); } catch { return []; }
+  function logLoad() {
+    try { return JSON.parse(localStorage.getItem(ACTION_LOG_KEY) || '[]'); } catch { return []; }
   }
-  function tlLogSave(entries) {
-    localStorage.setItem(TL_LOG_KEY, JSON.stringify(entries));
+  function logSave(entries) { localStorage.setItem(ACTION_LOG_KEY, JSON.stringify(entries)); }
+
+  function logAdd(category, action, details, undoData) {
+    const entries = logLoad();
+    entries.unshift({ id: Date.now(), category, action, details, undoData, ts: new Date().toISOString(), undone: false });
+    logSave(entries);
+    renderLog();
   }
-  function tlLogAdd(action, description, undoData) {
-    const entries = tlLogLoad();
-    entries.unshift({ id: Date.now(), action, description, undoData, ts: new Date().toISOString(), undone: false });
-    tlLogSave(entries);
-    renderTlLog();
-  }
-  function openTlLog()  { document.getElementById('tlLogPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderTlLog(); }
+
+  function openTlLog()  { document.getElementById('tlLogPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderLog(); }
   function closeTlLog() { document.getElementById('tlLogPanel').classList.remove('open'); document.getElementById('tlLogOverlay').style.display = 'none'; }
 
-  function renderTlLog() {
-    const entries = tlLogLoad();
+  const CATEGORY_COLOR = { Teamleader: '#e8622a', Outlook: '#4a9eff' };
+
+  function renderLog() {
+    const entries = logLoad();
     const body = document.getElementById('tlLogBody');
     const badge = document.getElementById('tlLogBadge');
-    const undone_count = entries.filter(e => !e.undone).length;
-    badge.textContent = undone_count;
-    badge.style.display = undone_count > 0 ? 'block' : 'none';
-    if (!entries.length) { body.innerHTML = '<div class="tl-log-empty">Nog geen wijzigingen geregistreerd.</div>'; return; }
-    body.innerHTML = entries.map(e => `
+    const active = entries.filter(e => !e.undone).length;
+    badge.textContent = active;
+    badge.style.display = active > 0 ? 'block' : 'none';
+    if (!entries.length) { body.innerHTML = '<div class="tl-log-empty">Nog geen acties geregistreerd.</div>'; return; }
+    body.innerHTML = entries.map(e => {
+      const color = CATEGORY_COLOR[e.category] || 'var(--text-dim)';
+      const detailLines = Object.entries(e.details || {})
+        .filter(([,v]) => v)
+        .map(([k,v]) => `<span style="color:var(--text-dim)">${k}:</span> ${v}`)
+        .join('<br>');
+      return `
       <div class="tl-log-entry" id="logentry-${e.id}">
         <div class="tl-log-entry-top">
           <div class="tl-log-entry-info">
-            <div class="tl-log-action">${e.action}</div>
-            <div class="tl-log-desc">${e.description}</div>
+            <div class="tl-log-action" style="color:${color}">[${e.category}] ${e.action}</div>
+            <div class="tl-log-desc" style="margin-top:4px;line-height:1.6;font-size:11px">${detailLines}</div>
           </div>
-          <div class="tl-log-time">${new Date(e.ts).toLocaleString('nl-BE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+          <div class="tl-log-time">${new Date(e.ts).toLocaleString('nl-BE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
         </div>
-        ${e.undoData && !e.undone ? `<button class="tl-log-undo" onclick="tlUndo(${e.id})">↩ Ongedaan maken</button>` : ''}
+        ${e.undoData && !e.undone ? `<button class="tl-log-undo" onclick="logUndo(${e.id})">↩ Ongedaan maken</button>` : ''}
         ${e.undone ? `<div style="color:var(--text-dim);font-size:11px;margin-top:6px;">✓ Ongedaan gemaakt</div>` : ''}
-      </div>`).join('');
+        ${!e.undoData && !e.undone ? `<div style="color:var(--text-dim);font-size:10px;margin-top:6px;">Niet omkeerbaar</div>` : ''}
+      </div>`;
+    }).join('');
   }
 
-  async function tlUndo(id) {
-    const entries = tlLogLoad();
+  async function logUndo(id) {
+    const entries = logLoad();
     const entry = entries.find(e => e.id === id);
     if (!entry || entry.undone) return;
     const btn = document.querySelector(`#logentry-${id} .tl-log-undo`);
     if (btn) { btn.disabled = true; btn.textContent = 'Bezig...'; }
     try {
-      const { type, resourceId } = entry.undoData;
-      if (type === 'contact')  await tlFetch(`/api/contacts/${resourceId}`,  { method: 'DELETE' });
-      if (type === 'company')  await tlFetch(`/api/companies/${resourceId}`, { method: 'DELETE' });
+      const u = entry.undoData;
+      if (u.type === 'tl_contact')  await tlFetch(`/api/contacts/${u.id}`, { method: 'DELETE' });
+      if (u.type === 'tl_company')  await tlFetch(`/api/companies/${u.id}`, { method: 'DELETE' });
+      if (u.type === 'outlook_event') await graphCall(`/me/events/${u.id}`, 'DELETE');
+      if (u.type === 'outlook_archive') await graphCall(`/me/messages/${u.id}/move`, 'POST', { destinationId: 'inbox' });
       entry.undone = true;
-      tlLogSave(entries);
-      renderTlLog();
+      logSave(entries);
+      renderLog();
       showToast('Actie ongedaan gemaakt.');
     } catch (err) {
       if (btn) { btn.disabled = false; btn.textContent = '↩ Ongedaan maken'; }
@@ -392,7 +404,11 @@
       method: 'POST', body: JSON.stringify({ first_name, last_name, email, company_id, phone })
     });
     const resourceId = data?.id || data?.data?.id;
-    tlLogAdd('Contact aangemaakt', `${first_name} ${last_name}${email ? ' — ' + email : ''}`, resourceId ? { type: 'contact', resourceId } : null);
+    logAdd('Teamleader', 'Contact aangemaakt', {
+      'Naam': `${first_name} ${last_name}`,
+      'E-mail': email || '',
+      'Telefoon': phone || '',
+    }, resourceId ? { type: 'tl_contact', id: resourceId } : null);
     return `Contact ${first_name} ${last_name} aangemaakt in Teamleader.`;
   }
 
@@ -407,7 +423,13 @@
       method: 'POST', body: JSON.stringify({ name, vat_number, email, phone, website })
     });
     const resourceId = data?.id || data?.data?.id;
-    tlLogAdd('Bedrijf aangemaakt', `${name}${vat_number ? ' — BTW: ' + vat_number : ''}`, resourceId ? { type: 'company', resourceId } : null);
+    logAdd('Teamleader', 'Bedrijf aangemaakt', {
+      'Naam': name,
+      'BTW-nummer': vat_number || '',
+      'E-mail': email || '',
+      'Telefoon': phone || '',
+      'Website': website || '',
+    }, resourceId ? { type: 'tl_company', id: resourceId } : null);
     return `Bedrijf "${name}" aangemaakt in Teamleader.`;
   }
 
@@ -538,7 +560,7 @@
     const now = new Date();
     const end = new Date(now.getTime() + 30 * 86400000);
     const data = await graphCall(
-      `/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${end.toISOString()}&$select=id,subject,start`
+      `/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${end.toISOString()}&$select=id,subject,start,end,location`
     );
     const match = data.value.find(e =>
       e.subject.toLowerCase().includes(subject.toLowerCase()) &&
@@ -546,17 +568,27 @@
     );
     if (!match) return `Geen afspraak gevonden met naam "${subject}".`;
     await graphCall(`/me/events/${match.id}`, 'DELETE');
+    logAdd('Outlook', 'Afspraak verwijderd', {
+      'Onderwerp': match.subject,
+      'Start': new Date(match.start.dateTime).toLocaleString('nl-BE', {weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}),
+    }, null);
     return `Afspraak "${match.subject}" verwijderd.`;
   }
 
   async function toolCreateCalendarEvent({ subject, start, end, location = '', body = '' }) {
-    await graphCall('/me/events', 'POST', {
+    const result = await graphCall('/me/events', 'POST', {
       subject,
       start: { dateTime: start, timeZone: 'Europe/Brussels' },
       end:   { dateTime: end,   timeZone: 'Europe/Brussels' },
       location: { displayName: location },
       body: { contentType: 'text', content: body }
     });
+    logAdd('Outlook', 'Afspraak aangemaakt', {
+      'Onderwerp': subject,
+      'Start': new Date(start).toLocaleString('nl-BE', {weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}),
+      'Einde': new Date(end).toLocaleString('nl-BE', {hour:'2-digit',minute:'2-digit'}),
+      'Locatie': location,
+    }, result?.id ? { type: 'outlook_event', id: result.id } : null);
     return `Afspraak "${subject}" aangemaakt op ${new Date(start).toLocaleString('nl-BE', {weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})}.`;
   }
 
@@ -579,11 +611,16 @@
     if (subject) filter += `contains(subject,'${subject}')`;
     if (subject && from) filter += ' and ';
     if (from) filter += `contains(from/emailAddress/address,'${from}') or contains(from/emailAddress/name,'${from}')`;
-    const url = `/me/messages?$top=5&$select=id,subject,from${filter ? '&$filter=' + encodeURIComponent(filter) : '&$orderby=receivedDateTime desc'}`;
+    const url = `/me/messages?$top=5&$select=id,subject,from,receivedDateTime${filter ? '&$filter=' + encodeURIComponent(filter) : '&$orderby=receivedDateTime desc'}`;
     const data = await graphCall(url);
     if (!data.value.length) return `Geen e-mail gevonden${subject ? ' met onderwerp "' + subject + '"' : ''}${from ? ' van ' + from : ''}.`;
     const msg = data.value[0];
     await graphCall(`/me/messages/${msg.id}/move`, 'POST', { destinationId: 'archive' });
+    logAdd('Outlook', 'E-mail gearchiveerd', {
+      'Onderwerp': msg.subject,
+      'Van': msg.from.emailAddress.name + ' <' + msg.from.emailAddress.address + '>',
+      'Ontvangen': new Date(msg.receivedDateTime).toLocaleString('nl-BE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+    }, { type: 'outlook_archive', id: msg.id });
     return `E-mail "${msg.subject}" van ${msg.from.emailAddress.name} gearchiveerd.`;
   }
 
@@ -595,6 +632,11 @@
         toRecipients: [{ emailAddress: { address: to } }]
       }
     });
+    logAdd('Outlook', 'E-mail verstuurd', {
+      'Aan': to,
+      'Onderwerp': subject,
+      'Inhoud': body.substring(0, 120) + (body.length > 120 ? '…' : ''),
+    }, null);
     return `E-mail "${subject}" verstuurd naar ${to}.`;
   }
 
