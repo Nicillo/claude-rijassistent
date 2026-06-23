@@ -347,8 +347,8 @@
 
   async function checkTlConnection() {
     try {
-      await tlFetch('/api/users');
-      tlConnected = true;
+      const res = await fetch(`${TL_PROXY}/api/users`, { headers: { 'x-tl-user': TL_USER } });
+      tlConnected = res.ok;
     } catch { tlConnected = false; }
     updateTlBtn();
   }
