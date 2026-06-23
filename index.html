@@ -207,28 +207,19 @@
 </head>
 <body>
 
-<!-- Log / Goedkeuringen paneel (actieve items) -->
-<div class="tl-log-overlay" id="tlLogOverlay" onclick="closeTlLog(); closeHistory();"></div>
+<!-- Log paneel (tabs: Goedkeuringen / Verleden) -->
+<div class="tl-log-overlay" id="tlLogOverlay" onclick="closeTlLog()"></div>
 <div class="tl-log-panel" id="tlLogPanel">
   <div class="tl-log-header">
-    <h3>⏳ Goedkeuringen</h3>
+    <div style="display:flex;gap:0;flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+      <button id="tabApproval" onclick="switchTab('approval')" style="flex:1;padding:7px;background:var(--accent);color:#fff;border:none;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">⏳ Goedkeuringen</button>
+      <button id="tabHistory"  onclick="switchTab('history')"  style="flex:1;padding:7px;background:transparent;color:var(--text-dim);border:none;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">📋 Log</button>
+    </div>
     <button class="tl-log-close" onclick="closeTlLog()">×</button>
   </div>
-  <div class="tl-log-body" id="tlLogBody">
-    <div class="tl-log-empty">Nog geen acties geregistreerd.</div>
-  </div>
+  <div class="tl-log-body" id="tlLogBody"></div>
 </div>
 
-<!-- Verleden paneel (uitgevoerde + ongedaan gemaakte acties) -->
-<div class="tl-log-panel" id="historyPanel" style="left:0;right:auto;border-right:1px solid var(--border);border-left:none;">
-  <div class="tl-log-header">
-    <h3>📋 Verleden</h3>
-    <button class="tl-log-close" onclick="closeHistory()">×</button>
-  </div>
-  <div class="tl-log-body" id="historyBody">
-    <div class="tl-log-empty">Nog geen uitgevoerde acties.</div>
-  </div>
-</div>
 
 <div class="api-overlay" id="apiOverlay">
   <div class="api-card">
@@ -291,8 +282,8 @@
   </div>
 
   <div class="bottom-bar">
-    <button class="bottom-bar-btn approval" onclick="openTlLog()">⏳ Goedkeuringen <span id="logBottomBadge"></span></button>
-    <button class="bottom-bar-btn history" onclick="openHistory()">📋 Verleden</button>
+    <button class="bottom-bar-btn approval" onclick="openTlLog('approval')">⏳ Goedkeuringen <span id="logBottomBadge"></span></button>
+    <button class="bottom-bar-btn history" onclick="openTlLog('history')">📋 Log</button>
   </div>
 </div>
 
@@ -315,10 +306,25 @@
     renderLog();
   }
 
-  function openTlLog()  { document.getElementById('tlLogPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderLog(); }
-  function closeTlLog() { document.getElementById('tlLogPanel').classList.remove('open'); document.getElementById('tlLogOverlay').style.display = 'none'; }
-  function openHistory()  { document.getElementById('historyPanel').classList.add('open'); document.getElementById('tlLogOverlay').style.display = 'block'; renderHistory(); }
-  function closeHistory() { document.getElementById('historyPanel').classList.remove('open'); document.getElementById('tlLogOverlay').style.display = 'none'; }
+  let activeTab = 'approval';
+  function openTlLog(tab = 'approval') {
+    activeTab = tab;
+    document.getElementById('tlLogPanel').classList.add('open');
+    document.getElementById('tlLogOverlay').style.display = 'block';
+    switchTab(tab);
+  }
+  function closeTlLog() {
+    document.getElementById('tlLogPanel').classList.remove('open');
+    document.getElementById('tlLogOverlay').style.display = 'none';
+  }
+  function switchTab(tab) {
+    activeTab = tab;
+    const aBtn = document.getElementById('tabApproval');
+    const hBtn = document.getElementById('tabHistory');
+    if (aBtn) { aBtn.style.background = tab === 'approval' ? 'var(--accent)' : 'transparent'; aBtn.style.color = tab === 'approval' ? '#fff' : 'var(--text-dim)'; }
+    if (hBtn) { hBtn.style.background = tab === 'history'  ? 'var(--blue)'   : 'transparent'; hBtn.style.color = tab === 'history'  ? '#fff' : 'var(--text-dim)'; }
+    tab === 'approval' ? renderLog() : renderHistory();
+  }
 
   function renderHistory() {
     const entries = logLoad();
