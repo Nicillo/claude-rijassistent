@@ -368,14 +368,15 @@
     const poll = setInterval(async () => {
       attempts++;
       try {
-        await tlFetch('/api/users');
-        tlConnected = true;
-        updateTlBtn();
-        showToast('Teamleader verbonden!');
-        clearInterval(poll);
-      } catch {
-        if (attempts >= 30) clearInterval(poll);
-      }
+        const res = await fetch(`${TL_PROXY}/api/users`, { headers: { 'x-tl-user': TL_USER } });
+        if (res.ok) {
+          tlConnected = true;
+          updateTlBtn();
+          showToast('Teamleader verbonden!');
+          clearInterval(poll);
+        }
+      } catch {}
+      if (attempts >= 60) clearInterval(poll);
     }, 2000);
   }
 
@@ -438,6 +439,7 @@
   initMsal();
   checkTlConnection();
   // Hercheck TL verbinding elke keer de gebruiker terugkeert naar dit tabblad
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !tlConnected) checkTlConnection(); });
   window.addEventListener('focus', () => { if (!tlConnected) checkTlConnection(); });
 
   // ── API key ─────────────────────────────────────────────
