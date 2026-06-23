@@ -175,6 +175,14 @@
   .bottom-bar-btn.approval:active { background: var(--accent); color: #fff; }
   .bottom-bar-btn.history { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
   .bottom-bar-btn.history:active { border-color: var(--blue); color: var(--blue); }
+  /* ── Optie-chips ── */
+  .option-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .option-chip {
+    background: var(--surface2); border: 1px solid var(--blue); border-radius: 20px;
+    padding: 6px 14px; color: var(--blue); font-size: 12px; font-family: inherit;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; transition: all 0.15s;
+  }
+  .option-chip:active { background: var(--blue); color: #fff; }
   .api-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.9);
     display: flex; align-items: center; justify-content: center; z-index: 100;
@@ -1185,6 +1193,15 @@ Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag 
   }
 
   // ── UI helpers ──────────────────────────────────────────
+  function extractOptions(text) {
+    // Detecteer genummerde lijst (1. ... 2. ...) of bullet lijst (• ...)
+    const numbered = [...text.matchAll(/^\s*(\d+)[.)]\s+(.+)/gm)].map(m => m[2].trim());
+    if (numbered.length >= 2) return numbered;
+    const bullets = [...text.matchAll(/^\s*[•\-\*]\s+(.+)/gm)].map(m => m[1].trim());
+    if (bullets.length >= 2) return bullets;
+    return [];
+  }
+
   function addMessage(role, text) {
     const conv = document.getElementById('conversation');
     const div = document.createElement('div');
@@ -1197,6 +1214,29 @@ Werkwijze contactgegevens uit e-mail halen: Als een naam niet goed werkt, vraag 
     bubble.textContent = text;
     div.appendChild(label);
     div.appendChild(bubble);
+
+    // Voeg klikbare chips toe als Claude opties geeft
+    if (role === 'assistant') {
+      const options = extractOptions(text);
+      if (options.length) {
+        const chips = document.createElement('div');
+        chips.className = 'option-chips';
+        options.forEach(opt => {
+          const btn = document.createElement('button');
+          btn.className = 'option-chip';
+          // Toon enkel het eerste deel (voor lange regels)
+          btn.textContent = opt.length > 50 ? opt.substring(0, 48) + '…' : opt;
+          btn.onclick = () => {
+            // Verwijder alle chips na klik
+            chips.remove();
+            handleUserInput(opt);
+          };
+          chips.appendChild(btn);
+        });
+        div.appendChild(chips);
+      }
+    }
+
     conv.appendChild(div);
     conv.scrollTop = conv.scrollHeight;
     return div;
