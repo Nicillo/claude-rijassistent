@@ -234,7 +234,7 @@
     <div class="logo-dot" style="width:10px;height:10px"></div>
     <div class="api-title">Claude Rijassistent</div>
     <div class="api-sub">Voer je Anthropic API-sleutel in om te starten. Deze wordt lokaal opgeslagen in je browser.</div>
-    <input class="api-input" type="password" id="apiKeyInput" placeholder="sk-ant-..." />
+    <input class="api-input" type="password" id="apiKeyInput" placeholder="sk-ant-..." onkeydown="if(event.key==='Enter')saveApiKey()" />
     <button class="api-btn" onclick="saveApiKey()">Starten →</button>
   </div>
 </div>
@@ -688,10 +688,11 @@
   // ── API key ─────────────────────────────────────────────
   function saveApiKey() {
     const val = document.getElementById('apiKeyInput').value.trim();
-    if (!val.startsWith('sk-')) { showToast('Ongeldige sleutel — moet beginnen met sk-'); return; }
+    if (!val) { showToast('Voer een API-sleutel in'); return; }
     apiKey = val;
     localStorage.setItem('claude_api_key', val);
     document.getElementById('apiOverlay').style.display = 'none';
+    showToast('API-sleutel opgeslagen');
   }
 
   // ── MSAL / Outlook ──────────────────────────────────────
