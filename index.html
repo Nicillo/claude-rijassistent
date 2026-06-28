@@ -384,13 +384,15 @@
     archive_email:        'E-mail archiveren',
     move_email_to_folder: 'E-mail verplaatsen naar map',
     link_email_to_deal:   'E-mail koppelen aan deal',
+    tl_create_product:    'Artikel aanmaken in Teamleader',
+    tl_create_quotation:  'Offerte aanmaken in Teamleader',
   };
 
   // ── Approval flow ────────────────────────────────────────
   const WRITE_TOOLS = new Set([
     'create_calendar_event','delete_calendar_event','send_email','archive_email',
     'tl_create_contact','tl_create_company','move_email_to_folder','tl_add_deal_note',
-    'tl_create_deal','link_email_to_deal'
+    'tl_create_deal','link_email_to_deal','tl_create_product','tl_create_quotation'
   ]);
 
   let approvalResolve = null;
@@ -1018,6 +1020,55 @@
     return `Deal "${title}" aangemaakt voor ${company.name}.`;
   }
 
+  async function toolTlSearchProducts({ query }) {
+    const results = await tlFetch(`/api/products/search?q=${encodeURIComponent(query)}`);
+    if (!results.length) return `Geen artikelen gevonden voor "${query}".`;
+    const lines = results.map(p =>
+      `${p.cst_code} — ${p.article_ref || '—'} — ${p.description || '—'} — €${p.price ?? '?'} (ID: ${p.id})`
+    );
+    return `Gevonden artikelen:\n${lines.join('\n')}\n\nTOON DEZE LIJST LETTERLIJK in je antwoord.`;
+  }
+
+  async function toolTlCreateProduct({ description, article_ref, price, inventor_id }) {
+    const nextCst = await tlFetch('/api/products/next-cst');
+    const data = await tlFetch('/api/products/create', {
+      method: 'POST',
+      body: JSON.stringify({ description, article_ref, price, inventor_id })
+    });
+    const code = data.cst_code || nextCst.next_code;
+    logAdd('Teamleader', 'Artikel aangemaakt', {
+      'Code': code,
+      'Referentie': article_ref || '',
+      'Omschrijving': description,
+      'Prijs': price ? `€${price}` : '',
+    }, null);
+    return `Artikel ${code} aangemaakt: ${description}${article_ref ? ` (${article_ref})` : ''}.`;
+  }
+
+  async function toolTlCreateQuotation({ deal_id, title, lines, expiry_date }) {
+    const data = await tlFetch('/api/quotations/create', {
+      method: 'POST',
+      body: JSON.stringify({ deal_id, title, lines, expiry_date })
+    });
+    const totalLines = lines.map(l => `  • ${l.description}: ${l.quantity}× €${l.unit_price}`).join('\n');
+    logAdd('Teamleader', 'Offerte aangemaakt', {
+      'Deal ID': deal_id,
+      'Sectie': title || 'Offerte',
+      'Regelposten': lines.length,
+      'Vervaldatum': expiry_date || '',
+    }, null);
+    return `Offerte aangemaakt (ID: ${data.id}).\n${totalLines}`;
+  }
+
+  async function toolTlListQuotations({ deal_id }) {
+    const quotes = await tlFetch(`/api/quotations/list?deal_id=${deal_id}`);
+    if (!quotes.length) return 'Geen offertes gevonden voor deze deal.';
+    const lines = quotes.map(q =>
+      `${q.status.toUpperCase()} — €${q.total ?? '?'} excl. BTW (ID: ${q.id})`
+    );
+    return `Offertes:\n${lines.join('\n')}`;
+  }
+
   async function executeTool(name, input) {
     // Schrijf-acties vragen eerst goedkeuring
     if (WRITE_TOOLS.has(name)) {
@@ -1074,6 +1125,10 @@
       case 'tl_add_deal_note':         return toolTlAddDealNote(input);
       case 'tl_get_company_info':      return toolTlGetCompanyInfo(input);
       case 'tl_create_deal':           return toolTlCreateDeal(input);
+      case 'tl_search_products':       return toolTlSearchProducts(input);
+      case 'tl_create_product':        return toolTlCreateProduct(input);
+      case 'tl_create_quotation':      return toolTlCreateQuotation(input);
+      case 'tl_list_quotations':       return toolTlListQuotations(input);
       default: throw new Error(`Onbekend tool: ${name}`);
     }
   }
@@ -1291,6 +1346,69 @@
         },
         required: ['title', 'company_name']
       }
+    },
+    {
+      name: 'tl_search_products',
+      description: 'Zoek artikelen/producten in Teamleader op naam, CST-nummer of leverancierscode. Gebruik dit voor je een offerte maakt.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Zoekterm: productnaam, CST0097, leveranciersnummer' }
+        },
+        required: ['query']
+      }
+    },
+    {
+      name: 'tl_create_product',
+      description: 'Maak een nieuw artikel aan in Teamleader. Krijgt automatisch het volgende CST-nummer (bv. CST0099). Voor Autodesk Inventor-onderdelen gebruik inventor_id.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          description:  { type: 'string', description: 'Omschrijving van het artikel (bv. "SKF kogellager 6205-2RS")' },
+          article_ref:  { type: 'string', description: 'Leveranciersnummer/artikelcode (bv. "6205-2RS")' },
+          price:        { type: 'number', description: 'Verkoopprijs excl. BTW in EUR' },
+          inventor_id:  { type: 'string', description: '6-cijferig Autodesk Inventor ID (bv. "012964") — gebruikt dit ipv auto-CST' },
+        },
+        required: ['description']
+      }
+    },
+    {
+      name: 'tl_create_quotation',
+      description: 'Maak een offerte aan in Teamleader voor een bestaande deal. Zoek eerst artikelen met tl_search_products. BTW 21% wordt automatisch toegepast.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          deal_id:      { type: 'string', description: 'UUID van de deal in Teamleader' },
+          title:        { type: 'string', description: 'Sectietitel op de offerte (bv. "Cobot installatie Lijn 3")' },
+          expiry_date:  { type: 'string', description: 'Vervaldatum ISO formaat (bv. "2026-07-31")' },
+          lines: {
+            type: 'array',
+            description: 'Regelposten van de offerte',
+            items: {
+              type: 'object',
+              properties: {
+                description: { type: 'string', description: 'Omschrijving van de post' },
+                quantity:    { type: 'number', description: 'Aantal' },
+                unit_price:  { type: 'number', description: 'Eenheidsprijs excl. BTW in EUR' },
+                product_id:  { type: 'string', description: 'TL product UUID (optioneel, uit tl_search_products)' },
+              },
+              required: ['description', 'quantity', 'unit_price']
+            }
+          }
+        },
+        required: ['deal_id', 'lines']
+      }
+    },
+    {
+      name: 'tl_list_quotations',
+      description: 'Bekijk bestaande offertes voor een deal in Teamleader.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          deal_id: { type: 'string', description: 'UUID van de deal' }
+        },
+        required: ['deal_id']
+      }
     }
   ];
 
@@ -1409,7 +1527,9 @@
 
 Werkwijze contacten toevoegen: gebruik suggest_contacts_from_email (met company filter indien van toepassing). De tool geeft een genummerde lijst — kopieer die lijst LETTERLIJK in je antwoord, voeg niets samen, vat niets samen. Als de gebruiker daarna "ja" of een naam of nummer zegt, voeg dan DIE persoon toe — zoek NIET opnieuw in e-mails tenzij je de handtekening nog nodig hebt. Gebruik get_emails met include_body:true alleen om extra gegevens (telefoon, functie) op te halen van de gekozen persoon. Gebruik tl_search_companies om de company_id (UUID) op te zoeken — stuur nooit de bedrijfsnaam als company_id. Een contact mag je ALLEEN aanmaken met minstens naam EN e-mailadres. Telefoonnummer en functie zijn sterk gewenst.
 
-Mailorganisatie: gebruik move_email_to_folder om e-mails per klant of project te sorteren. Gebruik list_email_folders voor een overzicht. Bij vragen over een klant gebruik tl_get_company_info voor volledig overzicht (contacten + deals). Gebruik tl_get_deals om deals op te zoeken en tl_add_deal_note om e-mailsamenvattingen of vergadernotities aan een deal te koppelen.`,
+Mailorganisatie: gebruik move_email_to_folder om e-mails per klant of project te sorteren. Gebruik list_email_folders voor een overzicht. Bij vragen over een klant gebruik tl_get_company_info voor volledig overzicht (contacten + deals). Gebruik tl_get_deals om deals op te zoeken en tl_add_deal_note om e-mailsamenvattingen of vergadernotities aan een deal te koppelen.
+
+Offertes en artikelen: gebruik tl_search_products om artikelen te zoeken voor je een offerte maakt. Toon de lijst letterlijk met CST-code, referentie, omschrijving en prijs. Gebruik tl_create_product om een nieuw artikel aan te maken (krijgt automatisch het volgende CST-nummer). Gebruik tl_create_quotation om een offerte aan te maken — vereis altijd deal_id, omschrijving, aantal en prijs per regel. BTW 21% wordt automatisch toegepast. Gebruik tl_list_quotations om bestaande offertes op een deal te bekijken.`,
             tools: CLAUDE_TOOLS,
             messages
           })
