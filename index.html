@@ -1020,6 +1020,12 @@
     return `Deal "${title}" aangemaakt voor ${company.name}.`;
   }
 
+  async function toolLookupSupplierProduct({ supplier, article_ref }) {
+    const sup = (supplier || 'shakehand').toLowerCase();
+    const r = await tlFetch(`/api/products/supplier-lookup?supplier=${encodeURIComponent(sup)}&ref=${encodeURIComponent(article_ref)}`);
+    return `Productinfo van ${r.supplier} voor "${article_ref}":\n\n${r.raw_text}\n\nGenereer op basis hiervan een neutrale technische beschrijving in het Engels (max 1 zin, geen merknaam). Gebruik dit voor tl_create_product.`;
+  }
+
   async function toolTlSearchProducts({ query }) {
     const results = await tlFetch(`/api/products/search?q=${encodeURIComponent(query)}`);
     if (!results.length) return `Geen artikelen gevonden voor "${query}".`;
@@ -1125,6 +1131,7 @@
       case 'tl_add_deal_note':         return toolTlAddDealNote(input);
       case 'tl_get_company_info':      return toolTlGetCompanyInfo(input);
       case 'tl_create_deal':           return toolTlCreateDeal(input);
+      case 'lookup_supplier_product':   return toolLookupSupplierProduct(input);
       case 'tl_search_products':       return toolTlSearchProducts(input);
       case 'tl_create_product':        return toolTlCreateProduct(input);
       case 'tl_create_quotation':      return toolTlCreateQuotation(input);
@@ -1348,6 +1355,18 @@
       }
     },
     {
+      name: 'lookup_supplier_product',
+      description: 'Haal technische productinfo op van een leverancierswebshop op basis van het artikelnummer. Werkt voor Shakehand/Elesa-Ganter. Gebruik dit voor je een nieuw artikel aanmaakt in Teamleader om een neutrale Engelse beschrijving te genereren.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          supplier:     { type: 'string', description: 'Leverancier: "shakehand" (Elesa-Ganter). Standaard: shakehand.' },
+          article_ref:  { type: 'string', description: 'Artikelreferentie/code zoals in Teamleader (bv. "NDE.T-40x2-M8", "DVA.5-75-25-M10")' },
+        },
+        required: ['article_ref']
+      }
+    },
+    {
       name: 'tl_search_products',
       description: 'Zoek artikelen/producten in Teamleader op naam, CST-nummer of leverancierscode. Gebruik dit voor je een offerte maakt.',
       input_schema: {
@@ -1529,7 +1548,7 @@ Werkwijze contacten toevoegen: gebruik suggest_contacts_from_email (met company 
 
 Mailorganisatie: gebruik move_email_to_folder om e-mails per klant of project te sorteren. Gebruik list_email_folders voor een overzicht. Bij vragen over een klant gebruik tl_get_company_info voor volledig overzicht (contacten + deals). Gebruik tl_get_deals om deals op te zoeken en tl_add_deal_note om e-mailsamenvattingen of vergadernotities aan een deal te koppelen.
 
-Offertes en artikelen: gebruik tl_search_products om artikelen te zoeken voor je een offerte maakt. Toon de lijst letterlijk met CST-code, referentie, omschrijving en prijs. Gebruik tl_create_product om een nieuw artikel aan te maken (krijgt automatisch het volgende CST-nummer). Gebruik tl_create_quotation om een offerte aan te maken — vereis altijd deal_id, omschrijving, aantal en prijs per regel. BTW 21% wordt automatisch toegepast. Gebruik tl_list_quotations om bestaande offertes op een deal te bekijken.`,
+Artikelen en leveranciers: gebruik lookup_supplier_product om technische info op te halen van Shakehand (Elesa-Ganter) op basis van het artikelnummer uit Teamleader. Gebruik die info om een neutrale technische beschrijving in het Engels te genereren — geen merknamen, geen "Elesa", geen "Ganter". Gebruik daarna tl_create_product om het artikel aan te maken met auto-CST-nummer. Gebruik tl_search_products om bestaande artikelen te zoeken voor je een offerte maakt. Toon de lijst letterlijk met CST-code, referentie, omschrijving en prijs. Gebruik tl_create_product om een nieuw artikel aan te maken (krijgt automatisch het volgende CST-nummer). Gebruik tl_create_quotation om een offerte aan te maken — vereis altijd deal_id, omschrijving, aantal en prijs per regel. BTW 21% wordt automatisch toegepast. Gebruik tl_list_quotations om bestaande offertes op een deal te bekijken.`,
             tools: CLAUDE_TOOLS,
             messages
           })
